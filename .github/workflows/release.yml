@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }}/${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        arch: [amd64, arm64]
+        exclude:
+          - os: ubuntu-latest
+            arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.os == 'ubuntu-latest' && 'linux' || 'darwin' }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -o oido-gmail-mcp .
+          chmod +x oido-gmail-mcp
+
+      - name: Package
+        env:
+          GOOS: ${{ matrix.os == 'ubuntu-latest' && 'linux' || 'darwin' }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p dist/commands dist/skills/oido-gmail
+          cp oido-extension.json OIDO.md README.md dist/ 2>/dev/null || true
+          cp oido-gmail-mcp dist/
+          cp commands/* dist/commands/ 2>/dev/null || true
+          cp skills/oido-gmail/* dist/skills/oido-gmail/ 2>/dev/null || true
+          ZIP_NAME="oido-gmail-${GOOS}-${GOARCH}.zip"
+          cd dist && zip -r "../$ZIP_NAME" . && cd ..
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oido-gmail-${{ matrix.os == 'ubuntu-latest' && 'linux' || 'darwin' }}-${{ matrix.arch }}
+          path: ${{ env.ZIP_NAME }}
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version || github.ref_name }}
+          name: Release ${{ github.event.inputs.version || github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: artifacts/**/*.zip
