@@ -1,0 +1,10 @@
+name = "list-emails"
+description = "List recent emails from the INBOX."
+
+prompt = """
+List recent emails from the INBOX using the list_emails tool.
+Show the subject, from, date, and UID for each email.
+"""
+
+[parameters]
+count = { type = "number", description = "Number of recent emails to retrieve (default: 20)", default = 20 }

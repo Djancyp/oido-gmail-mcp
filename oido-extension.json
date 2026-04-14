@@ -1,0 +1,73 @@
+{
+  "name": "oido-gmail",
+  "version": "1.0.0",
+  "description": "Send, receive, and search emails via IMAP/SMTP using MCP server.",
+  "mcpServers": {
+    "oido-gmail": {
+      "command": "${extensionPath}/oido-gmail-mcp",
+      "args": [],
+      "env": {
+        "GMAIL_EMAIL": "${GMAIL_EMAIL}",
+        "GMAIL_PASSWORD": "${GMAIL_PASSWORD}",
+        "GMAIL_IMAP_HOST": "${GMAIL_IMAP_HOST}",
+        "GMAIL_IMAP_PORT": "${GMAIL_IMAP_PORT}",
+        "GMAIL_SMTP_HOST": "${GMAIL_SMTP_HOST}",
+        "GMAIL_SMTP_PORT": "${GMAIL_SMTP_PORT}",
+        "GMAIL_ALLOW_SEND": "${GMAIL_ALLOW_SEND}",
+        "GMAIL_ALLOW_RECEIVE": "${GMAIL_ALLOW_RECEIVE}"
+      }
+    }
+  },
+  "contextFileName": "OIDO.md",
+  "excludeTools": [],
+  "settings": [
+    {
+      "name": "GMAIL_EMAIL",
+      "description": "Email address for IMAP/SMTP authentication",
+      "defaultValue": "",
+      "type": "string"
+    },
+    {
+      "name": "GMAIL_PASSWORD",
+      "description": "App password for IMAP/SMTP authentication (use Gmail App Password, not account password)",
+      "defaultValue": "",
+      "type": "string"
+    },
+    {
+      "name": "GMAIL_IMAP_HOST",
+      "description": "IMAP server host",
+      "defaultValue": "imap.gmail.com",
+      "type": "string"
+    },
+    {
+      "name": "GMAIL_IMAP_PORT",
+      "description": "IMAP server port",
+      "defaultValue": "993",
+      "type": "string"
+    },
+    {
+      "name": "GMAIL_SMTP_HOST",
+      "description": "SMTP server host",
+      "defaultValue": "smtp.gmail.com",
+      "type": "string"
+    },
+    {
+      "name": "GMAIL_SMTP_PORT",
+      "description": "SMTP server port",
+      "defaultValue": "587",
+      "type": "string"
+    },
+    {
+      "name": "GMAIL_ALLOW_SEND",
+      "description": "Allow sending emails via SMTP",
+      "defaultValue": "false",
+      "type": "bool"
+    },
+    {
+      "name": "GMAIL_ALLOW_RECEIVE",
+      "description": "Allow reading/receiving emails via IMAP",
+      "defaultValue": "true",
+      "type": "bool"
+    }
+  ]
+}

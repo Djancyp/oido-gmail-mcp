@@ -1,0 +1,10 @@
+name = "read-email"
+description = "Read the full content of a specific email by UID."
+
+prompt = """
+Read the full content of email with UID {{uid}} using the read_email tool.
+Show subject, from, to, date, and full body.
+"""
+
+[parameters]
+uid = { type = "number", description = "Unique ID of the email to read", required = true }

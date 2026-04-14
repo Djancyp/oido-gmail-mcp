@@ -1,0 +1,11 @@
+name = "search-emails"
+description = "Search emails by subject in the INBOX."
+
+prompt = """
+Search for emails matching the query "{{query}}" in the subject using the search_emails tool.
+Return at most {{count}} results.
+"""
+
+[parameters]
+query = { type = "string", description = "Search term to match in email subject", required = true }
+count = { type = "number", description = "Maximum number of results to return (default: 20)", default = 20 }

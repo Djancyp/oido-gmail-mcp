@@ -1,0 +1,15 @@
+name = "send-email"
+description = "Send an email via SMTP."
+
+prompt = """
+Send an email using the send_email tool.
+
+Recipient: {{to}}
+Subject: {{subject}}
+Body: {{body}}
+"""
+
+[parameters]
+to = { type = "string", description = "Recipient email address", required = true }
+subject = { type = "string", description = "Email subject line", required = true }
+body = { type = "string", description = "Email body text", required = true }
