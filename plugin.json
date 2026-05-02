@@ -1,0 +1,16 @@
+{
+  "id": "oido-gmail",
+  "name": "Oido Gmail",
+  "version": "1.0.0",
+  "description": "Send, receive, search, and list emails via IMAP/SMTP using MCP server.",
+  "type": "extension",
+  "enabled": true,
+  "binary": "oido-gmail-mcp",
+  "protocol_version": 1,
+  "os": ["linux", "darwin"],
+  "arch": ["amd64", "arm64"],
+  "config_schema": {},
+  "capabilities": ["list_emails", "read_email", "send_email", "save_draft", "search_emails"],
+  "author": "oido-studio",
+  "homepage": "https://gmail.com"
+}

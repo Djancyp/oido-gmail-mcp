@@ -52,7 +52,7 @@ jobs:
           GOARCH: ${{ matrix.arch }}
         run: |
           mkdir -p dist/commands dist/skills/oido-gmail
-          cp oido-extension.json OIDO.md README.md dist/ 2>/dev/null || true
+          cp plugin.json oido-extension.json OIDO.md README.md dist/ 2>/dev/null || true
           cp oido-gmail-mcp dist/
           cp commands/* dist/commands/ 2>/dev/null || true
           cp skills/oido-gmail/* dist/skills/oido-gmail/ 2>/dev/null || true

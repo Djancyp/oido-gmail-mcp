@@ -16,6 +16,7 @@ dist: build
 	@mkdir -p $(DIST_DIR)
 	@echo "Packaging $(PLUGIN_NAME).zip..."
 	@cd $(DIST_DIR) && zip -j ../$(DIST_DIR)/$(PLUGIN_NAME).zip \
+		../plugin.json \
 		../oido-extension.json \
 		../OIDO.md \
 		../$(BINARY)
