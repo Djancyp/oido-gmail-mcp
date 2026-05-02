@@ -57,6 +57,8 @@ func RunMCPServer() {
 
 	handler := NewMCPHandler(gmailClient)
 
+	gmailClient.TestConnection()
+
 	// Create MCP server
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "oido-gmail",

@@ -160,6 +160,19 @@ func NewGmailClient() (*GmailClient, error) {
 	return &GmailClient{settings: settings}, nil
 }
 
+// TestConnection tests the IMAP connection and password, logging the result.
+func (c *GmailClient) TestConnection() {
+	log.Printf("Testing IMAP connection to %s:%d...", c.settings.IMAPHost, c.settings.IMAPPort)
+	client, err := c.getIMAPClient()
+	if err != nil {
+		log.Printf("IMAP connection FAILED: %v", err)
+		log.Printf("Check your GMAIL_EMAIL, GMAIL_PASSWORD, and ensure IMAP is enabled in Gmail settings.")
+		return
+	}
+	client.Logout()
+	log.Printf("IMAP connection OK - authentication successful")
+}
+
 // getIMAPClient connects to the IMAP server and returns an authenticated client.
 func (c *GmailClient) getIMAPClient() (*client.Client, error) {
 	addr := fmt.Sprintf("%s:%d", c.settings.IMAPHost, c.settings.IMAPPort)
