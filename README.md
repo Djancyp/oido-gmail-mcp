@@ -8,6 +8,39 @@ Send, receive, search, and list emails via IMAP/SMTP using the Model Context Pro
 - **Read Emails**: Fetch full email content by UID
 - **Send Emails**: Compose and send messages via SMTP
 - **Search Emails**: Filter inbox by subject keyword
+- **Save Drafts**: Compose and save draft emails without sending
+
+## Installation
+
+### Option 1: Upload via Plugins UI (Recommended)
+
+1. Download the latest release zip for your platform from [GitHub Releases](../../releases)
+   - Linux: `oido-gmail-linux-amd64.zip`
+   - macOS (Apple Silicon): `oido-gmail-darwin-arm64.zip`
+2. Open Qwen CLI → Plugins UI
+3. Upload the zip file
+4. Configure settings (email, password, permissions) in the plugin settings panel
+
+### Option 2: Build from Source
+
+```bash
+git clone <repo-url>
+cd oido-gmail
+make build
+```
+
+Then point your plugin configuration to the built `oido-gmail-mcp` binary.
+
+### Option 3: Manual Install from Release Artifacts
+
+```bash
+# Download and extract
+curl -LO https://github.com/<owner>/<repo>/releases/latest/download/oido-gmail-linux-amd64.zip
+unzip oido-gmail-linux-amd64.zip -d oido-gmail
+
+# Run the MCP server
+./oido-gmail/oido-gmail-mcp
+```
 
 ## Requirements
 
@@ -63,6 +96,9 @@ Read full email content by UID.
 
 ### `send_email`
 Send an email (requires `GMAIL_ALLOW_SEND=true`).
+
+### `save_draft`
+Save an email as a draft (requires `GMAIL_ALLOW_SEND=true`).
 
 ### `search_emails`
 Search emails by subject.

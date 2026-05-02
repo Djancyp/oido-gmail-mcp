@@ -1,0 +1,15 @@
+name = "save-draft"
+description = "Save an email as a draft in [Gmail]/Drafts."
+
+prompt = """
+Save a draft email using the save_draft tool.
+
+Recipient: {{to}}
+Subject: {{subject}}
+Body: {{body}}
+"""
+
+[parameters]
+to = { type = "string", description = "Recipient email address", required = true }
+subject = { type = "string", description = "Email subject line", required = true }
+body = { type = "string", description = "Email body text", required = true }

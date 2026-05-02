@@ -387,6 +387,41 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 	return summaries, nil
 }
 
+// SaveDraft saves an email as a draft in [Gmail]/Drafts via IMAP APPEND.
+func (c *GmailClient) SaveDraft(ctx context.Context, to, subject, body string) error {
+	if !c.settings.AllowSend {
+		return fmt.Errorf("blocked: saving drafts is not allowed (enable with GMAIL_ALLOW_SEND=true)")
+	}
+
+	if to == "" || subject == "" {
+		return fmt.Errorf("to and subject are required")
+	}
+
+	var msg bytes.Buffer
+	fromAddr := c.settings.Email
+	msg.WriteString(fmt.Sprintf("From: %s\r\n", fromAddr))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
+	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	msg.WriteString(fmt.Sprintf("Date: %s\r\n", time.Now().Format(time.RFC1123Z)))
+	msg.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	msg.WriteString("\r\n")
+	msg.WriteString(body)
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return err
+	}
+	defer imapClient.Logout()
+
+	draftsFolder := "[Gmail]/Drafts"
+	reader := bytes.NewReader(msg.Bytes())
+	if err := imapClient.Append(draftsFolder, nil, time.Now(), reader); err != nil {
+		return fmt.Errorf("failed to save draft to %s: %w", draftsFolder, err)
+	}
+
+	return nil
+}
+
 // SendEmail sends an email via SMTP.
 func (c *GmailClient) SendEmail(ctx context.Context, to, subject, body string) error {
 	if !c.settings.AllowSend {

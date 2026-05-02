@@ -35,6 +35,13 @@ type SendEmailArgs struct {
 	Body    string `json:"body" jsonschema:"Email body text"`
 }
 
+// SaveDraftArgs represents the arguments for save_draft tool.
+type SaveDraftArgs struct {
+	To      string `json:"to" jsonschema:"Recipient email address"`
+	Subject string `json:"subject" jsonschema:"Email subject line"`
+	Body    string `json:"body" jsonschema:"Email body text"`
+}
+
 // SearchEmailsArgs represents the arguments for search_emails tool.
 type SearchEmailsArgs struct {
 	Query string `json:"query" jsonschema:"Search term to match in email subject"`
@@ -73,6 +80,12 @@ func RunMCPServer() {
 		Name:        "send_email",
 		Description: "Send an email via SMTP. Requires recipient address, subject, and body.",
 	}, handler.HandleSendEmail)
+
+	// Register save_draft tool
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "save_draft",
+		Description: "Save an email as a draft in [Gmail]/Drafts. Requires recipient address, subject, and body. Requires GMAIL_ALLOW_SEND=true.",
+	}, handler.HandleSaveDraft)
 
 	// Register search_emails tool
 	mcp.AddTool(server, &mcp.Tool{
@@ -208,6 +221,52 @@ func (h *MCPHandler) HandleSendEmail(ctx context.Context, req *mcp.CallToolReque
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{Text: fmt.Sprintf("Email sent successfully to %s", args.To)},
+		},
+	}, nil, nil
+}
+
+// HandleSaveDraft saves an email as a draft.
+func (h *MCPHandler) HandleSaveDraft(ctx context.Context, req *mcp.CallToolRequest, args SaveDraftArgs) (*mcp.CallToolResult, any, error) {
+	if args.To == "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "Error: to parameter is required (recipient email address)"},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	if args.Subject == "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "Error: subject parameter is required"},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	if args.Body == "" {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "Error: body parameter is required"},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	err := h.gc.SaveDraft(ctx, args.To, args.Subject, args.Body)
+	if err != nil {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: fmt.Sprintf("Error: %v", err)},
+			},
+			IsError: true,
+		}, nil, nil
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: fmt.Sprintf("Draft saved successfully for %s", args.To)},
 		},
 	}, nil, nil
 }

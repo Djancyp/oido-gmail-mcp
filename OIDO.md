@@ -30,6 +30,16 @@ Send an email via SMTP.
 
 **Returns:** Success confirmation with recipient address.
 
+### `save_draft`
+Save an email as a draft in [Gmail]/Drafts via IMAP.
+
+**Parameters:**
+- `to` (string, required): Recipient email address
+- `subject` (string, required): Email subject line
+- `body` (string, required): Email body text
+
+**Returns:** Success confirmation that draft was saved.
+
 ### `search_emails`
 Search emails by subject in the INBOX.
 
@@ -72,11 +82,12 @@ Email sent successfully to alice@example.com
 - User asks to read, list, search, or send emails
 - User wants to check inbox
 - User wants to compose or reply to a message
+- User wants to save a draft without sending
 - User asks about email content or subject
 
 ## Notes
 
-- **IMAP for reading**: Connects via IMAP to fetch emails from INBOX
+- **IMAP for reading**: Connects via IMAP to fetch emails from INBOX and save drafts to [Gmail]/Drafts
 - **SMTP for sending**: Sends via SMTP with STARTTLS (port 587) or SMTPS (port 465)
 - **Configurable permissions**: Send and receive can be individually enabled/disabled
 - **Default read-only**: Only receiving enabled by default (GMAIL_ALLOW_RECEIVE=true, GMAIL_ALLOW_SEND=false)

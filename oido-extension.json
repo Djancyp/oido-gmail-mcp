@@ -2,6 +2,7 @@
   "name": "oido-gmail",
   "version": "1.0.0",
   "description": "Send, receive, and search emails via IMAP/SMTP using MCP server.",
+	"runtime": "make build",
   "mcpServers": {
     "oido-gmail": {
       "command": "${extensionPath}/oido-gmail-mcp",

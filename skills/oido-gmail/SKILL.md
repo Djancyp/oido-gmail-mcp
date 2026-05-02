@@ -1,13 +1,13 @@
 ---
 name: oido-gmail
-description: Send, receive, search, and list emails via IMAP/SMTP
+description: Send, receive, search, list, and save draft emails via IMAP/SMTP
 ---
 
 # Oido Gmail Extension
 
 ## Overview
 
-The Oido Gmail extension provides tools to send, receive, search, and list emails via IMAP and SMTP. Use these tools when users ask about email content, want to compose messages, or need to find specific emails.
+The Oido Gmail extension provides tools to send, receive, search, list, and save draft emails via IMAP and SMTP. Use these tools when users ask about email content, want to compose messages, or need to find specific emails.
 
 ## Available Tools
 
@@ -71,6 +71,29 @@ Send an email via SMTP.
 ```
 User: "Send an email to alice@example.com with subject 'Meeting Tomorrow' and body 'Hi, can we meet at 3pm?'"
 → Call send_email with to: "alice@example.com", subject: "Meeting Tomorrow", body: "Hi, can we meet at 3pm?"
+```
+
+**Response Format:**
+Returns success confirmation with recipient address.
+
+### `save_draft`
+
+Save an email as a draft in [Gmail]/Drafts via IMAP.
+
+**Parameters:**
+- `to` (string, required): Recipient email address
+- `subject` (string, required): Email subject line
+- `body` (string, required): Email body text
+
+**When to use:**
+- User wants to save a draft without sending
+- User wants to compose an email to review later
+- User asks to create a draft
+
+**Example Usage:**
+```
+User: "Save a draft to alice@example.com with subject 'Draft' and body 'Still working on this'"
+→ Call save_draft with to: "alice@example.com", subject: "Draft", body: "Still working on this"
 ```
 
 **Response Format:**
@@ -177,6 +200,17 @@ Assistant: I'll send that email for you.
 Email sent successfully to alice@example.com
 ```
 
+### Saving a Draft
+
+```
+User: "Save a draft to bob@example.com, subject 'Ideas', body 'Here are some ideas for the project...'"
+
+Assistant: I'll save that as a draft for you.
+[Calls save_draft with to: "bob@example.com", subject: "Ideas", body: "Here are some ideas for the project..."]
+
+Draft saved successfully for bob@example.com
+```
+
 ## Limitations
 
 - **IMAP only**: Connects to Gmail via IMAP (not Gmail API)
@@ -195,6 +229,7 @@ Email sent successfully to alice@example.com
 - `/read-email` - Read full email content (custom command)
 - `/send-email` - Send an email (custom command)
 - `/search-emails` - Search emails by subject (custom command)
+- `/save-draft` - Save an email as draft (custom command)
 
 ## Triggers
 
