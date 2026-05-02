@@ -6,9 +6,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"log"
 	"net/mail"
 	"net/smtp"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -37,8 +39,39 @@ func DefaultEmailSettings() *EmailSettings {
 	}
 }
 
+// loadDotEnv reads .env file from the binary's directory and sets env vars if not already set.
+func loadDotEnv() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	envPath := filepath.Join(filepath.Dir(exe), ".env")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		if key != "" && os.Getenv(key) == "" {
+			os.Setenv(key, val)
+		}
+	}
+	log.Printf("Loaded .env from %s", envPath)
+}
+
 // parseEmailSettings reads environment variables to configure email access.
 func parseEmailSettings() (*EmailSettings, error) {
+	loadDotEnv()
 	settings := DefaultEmailSettings()
 
 	settings.Email = os.Getenv("GMAIL_EMAIL")
