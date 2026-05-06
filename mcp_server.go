@@ -52,7 +52,8 @@ type SearchEmailsArgs struct {
 func RunMCPServer() {
 	gmailClient, err := NewGmailClient()
 	if err != nil {
-		log.Fatalf("Failed to create Gmail client: %v", err)
+		log.Printf("Warning: Gmail client init failed (tools will return errors): %v", err)
+		gmailClient = &GmailClient{settings: DefaultEmailSettings()}
 	}
 
 	handler := NewMCPHandler(gmailClient)

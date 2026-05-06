@@ -121,7 +121,7 @@ func parseEmailSettings() (*EmailSettings, error) {
 	}
 
 	if settings.Email == "" || settings.Password == "" {
-		return nil, fmt.Errorf("missing required env vars: GMAIL_EMAIL and GMAIL_PASSWORD must be set")
+		log.Println("Warning: GMAIL_EMAIL or GMAIL_PASSWORD not set. Tools will return errors until configured.")
 	}
 
 	return settings, nil
@@ -162,6 +162,10 @@ func NewGmailClient() (*GmailClient, error) {
 
 // TestConnection tests the IMAP connection and password, logging the result.
 func (c *GmailClient) TestConnection() {
+	if c.settings.Email == "" || c.settings.Password == "" {
+		log.Printf("IMAP connection SKIPPED - Gmail not configured")
+		return
+	}
 	log.Printf("Testing IMAP connection to %s:%d...", c.settings.IMAPHost, c.settings.IMAPPort)
 	client, err := c.getIMAPClient()
 	if err != nil {
@@ -175,6 +179,10 @@ func (c *GmailClient) TestConnection() {
 
 // getIMAPClient connects to the IMAP server and returns an authenticated client.
 func (c *GmailClient) getIMAPClient() (*client.Client, error) {
+	if c.settings.Email == "" || c.settings.Password == "" {
+		return nil, fmt.Errorf("Gmail not configured: set GMAIL_EMAIL and GMAIL_PASSWORD")
+	}
+
 	addr := fmt.Sprintf("%s:%d", c.settings.IMAPHost, c.settings.IMAPPort)
 
 	imapClient, err := client.DialTLS(addr, &tls.Config{
