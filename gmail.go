@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net/mail"
 	"net/smtp"
 	"os"
@@ -442,7 +446,8 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 }
 
 // SaveDraft saves an email as a draft in [Gmail]/Drafts via IMAP APPEND.
-func (c *GmailClient) SaveDraft(ctx context.Context, to, subject, body string) error {
+// from is the sender address; defaults to settings.Email if empty (supports Gmail "Send mail as").
+func (c *GmailClient) SaveDraft(ctx context.Context, from, to, subject, body string) error {
 	if !c.settings.AllowSend {
 		return fmt.Errorf("blocked: saving drafts is not allowed (enable with GMAIL_ALLOW_SEND=true)")
 	}
@@ -451,9 +456,12 @@ func (c *GmailClient) SaveDraft(ctx context.Context, to, subject, body string) e
 		return fmt.Errorf("to and subject are required")
 	}
 
+	if from == "" {
+		from = c.settings.Email
+	}
+
 	var msg bytes.Buffer
-	fromAddr := c.settings.Email
-	msg.WriteString(fmt.Sprintf("From: %s\r\n", fromAddr))
+	msg.WriteString(fmt.Sprintf("From: %s\r\n", from))
 	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
 	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
 	msg.WriteString(fmt.Sprintf("Date: %s\r\n", time.Now().Format(time.RFC1123Z)))
@@ -477,7 +485,8 @@ func (c *GmailClient) SaveDraft(ctx context.Context, to, subject, body string) e
 }
 
 // SendEmail sends an email via SMTP.
-func (c *GmailClient) SendEmail(ctx context.Context, to, subject, body string) error {
+// from is the sender address; defaults to settings.Email if empty (supports Gmail "Send mail as").
+func (c *GmailClient) SendEmail(ctx context.Context, from, to, subject, body string) error {
 	if !c.settings.AllowSend {
 		return fmt.Errorf("blocked: sending emails is not allowed (enable with GMAIL_ALLOW_SEND=true)")
 	}
@@ -486,11 +495,12 @@ func (c *GmailClient) SendEmail(ctx context.Context, to, subject, body string) e
 		return fmt.Errorf("to and subject are required")
 	}
 
-	// Build email message
-	var msg bytes.Buffer
+	if from == "" {
+		from = c.settings.Email
+	}
 
-	fromAddr := c.settings.Email
-	msg.WriteString(fmt.Sprintf("From: %s\r\n", fromAddr))
+	var msg bytes.Buffer
+	msg.WriteString(fmt.Sprintf("From: %s\r\n", from))
 	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
 	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
 	msg.WriteString(fmt.Sprintf("Date: %s\r\n", time.Now().Format(time.RFC1123Z)))
@@ -498,53 +508,7 @@ func (c *GmailClient) SendEmail(ctx context.Context, to, subject, body string) e
 	msg.WriteString("\r\n")
 	msg.WriteString(body)
 
-	// Send via SMTP
-	addr := fmt.Sprintf("%s:%d", c.settings.SMTPHost, c.settings.SMTPPort)
-
-	auth := smtp.PlainAuth("", c.settings.Email, c.settings.Password, c.settings.SMTPHost)
-
-	if c.settings.SMTPPort == 465 {
-		// Implicit TLS (SMTPS)
-		return c.sendSMTPS(addr, auth, c.settings.Email, to, msg.Bytes())
-	}
-
-	// STARTTLS
-	smtpClient, err := smtp.Dial(addr)
-	if err != nil {
-		return fmt.Errorf("failed to connect to SMTP server: %w", err)
-	}
-	defer smtpClient.Close()
-
-	if err := smtpClient.StartTLS(&tls.Config{ServerName: c.settings.SMTPHost}); err != nil {
-		return fmt.Errorf("STARTTLS failed: %w", err)
-	}
-
-	if err := smtpClient.Auth(auth); err != nil {
-		return fmt.Errorf("SMTP auth failed: %w", err)
-	}
-
-	if err := smtpClient.Mail(c.settings.Email); err != nil {
-		return fmt.Errorf("MAIL FROM failed: %w", err)
-	}
-
-	if err := smtpClient.Rcpt(to); err != nil {
-		return fmt.Errorf("RCPT TO failed: %w", err)
-	}
-
-	wr, err := smtpClient.Data()
-	if err != nil {
-		return fmt.Errorf("DATA command failed: %w", err)
-	}
-
-	if _, err := wr.Write(msg.Bytes()); err != nil {
-		return fmt.Errorf("failed to write email data: %w", err)
-	}
-
-	if err := wr.Close(); err != nil {
-		return fmt.Errorf("failed to close data writer: %w", err)
-	}
-
-	return smtpClient.Quit()
+	return c.sendMsgViaSMTP(from, to, msg.Bytes())
 }
 
 // sendSMTPS sends an email using implicit TLS (SMTPS on port 465).
@@ -609,4 +573,615 @@ func readHeaderFromData(data []byte) (mail.Header, error) {
 		return nil, err
 	}
 	return msg.Header, nil
+}
+
+// AttachmentInfo describes email attachment metadata.
+type AttachmentInfo struct {
+	Filename    string
+	ContentType string
+	Size        int
+}
+
+// AttachmentData holds a downloaded attachment.
+type AttachmentData struct {
+	Filename    string
+	ContentType string
+	Data        []byte
+}
+
+type mimeAttachment struct {
+	filename    string
+	contentType string
+	data        []byte
+}
+
+// listEmailsFromFolder retrieves recent email summaries from any IMAP folder.
+func (c *GmailClient) listEmailsFromFolder(ctx context.Context, folder string, count int) ([]EmailSummary, error) {
+	if !c.settings.AllowReceive {
+		return nil, fmt.Errorf("blocked: receiving emails is not allowed (enable with GMAIL_ALLOW_RECEIVE=true)")
+	}
+	if count <= 0 {
+		count = 20
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return nil, err
+	}
+	defer imapClient.Logout()
+
+	mbox, err := imapClient.Select(folder, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to select %s: %w", folder, err)
+	}
+	if mbox.Messages == 0 {
+		return []EmailSummary{}, nil
+	}
+
+	from := uint32(1)
+	if mbox.Messages >= uint32(count) {
+		from = mbox.Messages - uint32(count) + 1
+	}
+	seqset := new(imap.SeqSet)
+	seqset.AddRange(from, mbox.Messages)
+
+	headerSection := &imap.BodySectionName{
+		Peek: true,
+		BodyPartName: imap.BodyPartName{
+			Specifier: imap.HeaderSpecifier,
+		},
+	}
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchFlags, headerSection.FetchItem()}
+
+	messages := make(chan *imap.Message, count)
+	go func() {
+		_ = imapClient.Fetch(seqset, items, messages)
+	}()
+
+	var summaries []EmailSummary
+	for msg := range messages {
+		if len(summaries) >= count {
+			break
+		}
+		summary := EmailSummary{UID: msg.Uid}
+		for _, flag := range msg.Flags {
+			if flag == imap.SeenFlag {
+				summary.Seen = true
+				break
+			}
+		}
+		r := msg.GetBody(headerSection)
+		if r != nil {
+			headerData, _ := io.ReadAll(r)
+			msgHeader, _ := readHeaderFromData(headerData)
+			summary.Subject = msgHeader.Get("Subject")
+			summary.From = msgHeader.Get("From")
+			summary.Date = msgHeader.Get("Date")
+		}
+		if summary.Subject == "" {
+			summary.Subject = "(no subject)"
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, nil
+}
+
+// fetchRawEmail fetches the raw bytes of an email by UID from the given folder.
+func (c *GmailClient) fetchRawEmail(imapClient *client.Client, uid uint32, folder string) ([]byte, error) {
+	if folder == "" {
+		folder = "INBOX"
+	}
+	if _, err := imapClient.Select(folder, true); err != nil {
+		return nil, fmt.Errorf("failed to select %s: %w", folder, err)
+	}
+
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(uid)
+
+	section := &imap.BodySectionName{Peek: true}
+	items := []imap.FetchItem{section.FetchItem()}
+
+	messages := make(chan *imap.Message, 1)
+	go func() {
+		_ = imapClient.UidFetch(seqset, items, messages)
+	}()
+
+	msg := <-messages
+	if msg == nil {
+		return nil, fmt.Errorf("email with UID %d not found in %s", uid, folder)
+	}
+
+	r := msg.GetBody(section)
+	if r == nil {
+		return nil, fmt.Errorf("failed to get body for UID %d", uid)
+	}
+
+	return io.ReadAll(r)
+}
+
+// sendMsgViaSMTP sends pre-built email bytes to a recipient via SMTP.
+// from is the envelope sender; defaults to settings.Email if empty (supports Gmail "Send mail as").
+func (c *GmailClient) sendMsgViaSMTP(from, to string, msg []byte) error {
+	if from == "" {
+		from = c.settings.Email
+	}
+	addr := fmt.Sprintf("%s:%d", c.settings.SMTPHost, c.settings.SMTPPort)
+	auth := smtp.PlainAuth("", c.settings.Email, c.settings.Password, c.settings.SMTPHost)
+
+	if c.settings.SMTPPort == 465 {
+		return c.sendSMTPS(addr, auth, from, to, msg)
+	}
+
+	smtpClient, err := smtp.Dial(addr)
+	if err != nil {
+		return fmt.Errorf("failed to connect to SMTP server: %w", err)
+	}
+	defer smtpClient.Close()
+
+	if err := smtpClient.StartTLS(&tls.Config{ServerName: c.settings.SMTPHost}); err != nil {
+		return fmt.Errorf("STARTTLS failed: %w", err)
+	}
+	if err := smtpClient.Auth(auth); err != nil {
+		return fmt.Errorf("SMTP auth failed: %w", err)
+	}
+	if err := smtpClient.Mail(from); err != nil {
+		return fmt.Errorf("MAIL FROM failed: %w", err)
+	}
+	if err := smtpClient.Rcpt(to); err != nil {
+		return fmt.Errorf("RCPT TO failed: %w", err)
+	}
+	wr, err := smtpClient.Data()
+	if err != nil {
+		return fmt.Errorf("DATA command failed: %w", err)
+	}
+	if _, err := wr.Write(msg); err != nil {
+		return fmt.Errorf("failed to write email data: %w", err)
+	}
+	if err := wr.Close(); err != nil {
+		return fmt.Errorf("failed to close data writer: %w", err)
+	}
+	return smtpClient.Quit()
+}
+
+// decodeTransferEncoding wraps r to decode the given Content-Transfer-Encoding.
+func decodeTransferEncoding(encoding string, r io.Reader) io.Reader {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "base64":
+		data, _ := io.ReadAll(r)
+		clean := strings.NewReplacer("\r\n", "", "\n", "", "\r", "").Replace(strings.TrimSpace(string(data)))
+		decoded, _ := base64.StdEncoding.DecodeString(clean)
+		return bytes.NewReader(decoded)
+	case "quoted-printable":
+		return quotedprintable.NewReader(r)
+	default:
+		return r
+	}
+}
+
+// extractMIMEAttachments parses raw email bytes and returns all attachments.
+func extractMIMEAttachments(rawData []byte) []mimeAttachment {
+	msg, err := mail.ReadMessage(bytes.NewReader(rawData))
+	if err != nil {
+		return nil
+	}
+	return parseMIMEBody(msg.Header.Get("Content-Type"), msg.Header.Get("Content-Transfer-Encoding"), msg.Body, 0)
+}
+
+// parseMIMEBody recursively extracts attachments from a MIME body.
+func parseMIMEBody(contentType, transferEncoding string, body io.Reader, depth int) []mimeAttachment {
+	if depth > 4 {
+		return nil
+	}
+
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil || !strings.HasPrefix(mediaType, "multipart/") {
+		return nil
+	}
+
+	boundary := params["boundary"]
+	if boundary == "" {
+		return nil
+	}
+
+	decoded := decodeTransferEncoding(transferEncoding, body)
+	mr := multipart.NewReader(decoded, boundary)
+
+	var attachments []mimeAttachment
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+
+		partCT := part.Header.Get("Content-Type")
+		partTE := part.Header.Get("Content-Transfer-Encoding")
+		partDisp := part.Header.Get("Content-Disposition")
+
+		var filename string
+		if partDisp != "" {
+			_, dispParams, _ := mime.ParseMediaType(partDisp)
+			filename = dispParams["filename"]
+		}
+		if filename == "" && partCT != "" {
+			_, ctParams, _ := mime.ParseMediaType(partCT)
+			filename = ctParams["name"]
+		}
+
+		if filename != "" {
+			data, _ := io.ReadAll(decodeTransferEncoding(partTE, part))
+			attachments = append(attachments, mimeAttachment{
+				filename:    filename,
+				contentType: partCT,
+				data:        data,
+			})
+			continue
+		}
+
+		attachments = append(attachments, parseMIMEBody(partCT, partTE, part, depth+1)...)
+	}
+
+	return attachments
+}
+
+// DeleteEmail moves an email from INBOX to [Gmail]/Trash.
+func (c *GmailClient) DeleteEmail(ctx context.Context, uid uint32) error {
+	if !c.settings.AllowSend {
+		return fmt.Errorf("blocked: deleting emails is not allowed (enable with GMAIL_ALLOW_SEND=true)")
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return err
+	}
+	defer imapClient.Logout()
+
+	if _, err := imapClient.Select("INBOX", false); err != nil {
+		return fmt.Errorf("failed to select INBOX: %w", err)
+	}
+
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(uid)
+
+	if err := imapClient.UidCopy(seqset, "[Gmail]/Trash"); err != nil {
+		return fmt.Errorf("failed to copy to Trash: %w", err)
+	}
+
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	if err := imapClient.UidStore(seqset, item, []interface{}{imap.DeletedFlag}, nil); err != nil {
+		return fmt.Errorf("failed to mark as deleted: %w", err)
+	}
+
+	return imapClient.Expunge(nil)
+}
+
+// MarkEmail marks an email as read or unread in the given folder (default: INBOX).
+func (c *GmailClient) MarkEmail(ctx context.Context, uid uint32, folder string, read bool) error {
+	if folder == "" {
+		folder = "INBOX"
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return err
+	}
+	defer imapClient.Logout()
+
+	if _, err := imapClient.Select(folder, false); err != nil {
+		return fmt.Errorf("failed to select %s: %w", folder, err)
+	}
+
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(uid)
+
+	var op imap.FlagsOp
+	if read {
+		op = imap.AddFlags
+	} else {
+		op = imap.RemoveFlags
+	}
+
+	item := imap.FormatFlagsOp(op, true)
+	return imapClient.UidStore(seqset, item, []interface{}{imap.SeenFlag}, nil)
+}
+
+// ListLabels returns all available IMAP folders/labels.
+func (c *GmailClient) ListLabels(ctx context.Context) ([]string, error) {
+	if !c.settings.AllowReceive {
+		return nil, fmt.Errorf("blocked: receiving emails is not allowed (enable with GMAIL_ALLOW_RECEIVE=true)")
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return nil, err
+	}
+	defer imapClient.Logout()
+
+	mailboxes := make(chan *imap.MailboxInfo, 100)
+	go func() {
+		_ = imapClient.List("", "*", mailboxes)
+	}()
+
+	var labels []string
+	for mbox := range mailboxes {
+		labels = append(labels, mbox.Name)
+	}
+	return labels, nil
+}
+
+// MoveEmail moves an email from srcFolder to dstFolder.
+func (c *GmailClient) MoveEmail(ctx context.Context, uid uint32, srcFolder, dstFolder string) error {
+	if !c.settings.AllowSend {
+		return fmt.Errorf("blocked: moving emails is not allowed (enable with GMAIL_ALLOW_SEND=true)")
+	}
+	if srcFolder == "" {
+		srcFolder = "INBOX"
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return err
+	}
+	defer imapClient.Logout()
+
+	if _, err := imapClient.Select(srcFolder, false); err != nil {
+		return fmt.Errorf("failed to select %s: %w", srcFolder, err)
+	}
+
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(uid)
+
+	if err := imapClient.UidCopy(seqset, dstFolder); err != nil {
+		return fmt.Errorf("failed to copy to %s: %w", dstFolder, err)
+	}
+
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	if err := imapClient.UidStore(seqset, item, []interface{}{imap.DeletedFlag}, nil); err != nil {
+		return fmt.Errorf("failed to mark source as deleted: %w", err)
+	}
+
+	return imapClient.Expunge(nil)
+}
+
+// ReplyEmail sends a reply to the email with the given UID.
+// from is the sender address; defaults to settings.Email if empty (supports Gmail "Send mail as").
+func (c *GmailClient) ReplyEmail(ctx context.Context, from string, uid uint32, body string) error {
+	if !c.settings.AllowSend {
+		return fmt.Errorf("blocked: sending emails is not allowed (enable with GMAIL_ALLOW_SEND=true)")
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return err
+	}
+
+	rawData, err := c.fetchRawEmail(imapClient, uid, "INBOX")
+	imapClient.Logout()
+	if err != nil {
+		return err
+	}
+
+	origHeader, err := readHeaderFromData(rawData)
+	if err != nil {
+		return fmt.Errorf("failed to parse original email: %w", err)
+	}
+
+	replyTo := origHeader.Get("Reply-To")
+	if replyTo == "" {
+		replyTo = origHeader.Get("From")
+	}
+	addr, err := mail.ParseAddress(replyTo)
+	if err != nil {
+		return fmt.Errorf("failed to parse reply-to address %q: %w", replyTo, err)
+	}
+
+	subject := origHeader.Get("Subject")
+	if !strings.HasPrefix(strings.ToLower(subject), "re:") {
+		subject = "Re: " + subject
+	}
+
+	messageID := origHeader.Get("Message-Id")
+	references := origHeader.Get("References")
+	if references != "" && messageID != "" {
+		references = references + " " + messageID
+	} else if messageID != "" {
+		references = messageID
+	}
+
+	if from == "" {
+		from = c.settings.Email
+	}
+
+	var msg bytes.Buffer
+	msg.WriteString(fmt.Sprintf("From: %s\r\n", from))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", addr.Address))
+	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	msg.WriteString(fmt.Sprintf("Date: %s\r\n", time.Now().Format(time.RFC1123Z)))
+	if messageID != "" {
+		msg.WriteString(fmt.Sprintf("In-Reply-To: %s\r\n", messageID))
+	}
+	if references != "" {
+		msg.WriteString(fmt.Sprintf("References: %s\r\n", references))
+	}
+	msg.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	msg.WriteString("\r\n")
+	msg.WriteString(body)
+
+	return c.sendMsgViaSMTP(from, addr.Address, msg.Bytes())
+}
+
+// ForwardEmail forwards an email to the given recipient with optional added text.
+// from is the sender address; defaults to settings.Email if empty (supports Gmail "Send mail as").
+func (c *GmailClient) ForwardEmail(ctx context.Context, from string, uid uint32, to, additionalBody string) error {
+	if !c.settings.AllowSend {
+		return fmt.Errorf("blocked: sending emails is not allowed (enable with GMAIL_ALLOW_SEND=true)")
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return err
+	}
+
+	rawData, err := c.fetchRawEmail(imapClient, uid, "INBOX")
+	imapClient.Logout()
+	if err != nil {
+		return err
+	}
+
+	origHeader, err := readHeaderFromData(rawData)
+	if err != nil {
+		return fmt.Errorf("failed to parse original email: %w", err)
+	}
+
+	subject := origHeader.Get("Subject")
+	lower := strings.ToLower(subject)
+	if !strings.HasPrefix(lower, "fwd:") && !strings.HasPrefix(lower, "fw:") {
+		subject = "Fwd: " + subject
+	}
+
+	if from == "" {
+		from = c.settings.Email
+	}
+
+	origBody := extractBody(rawData)
+
+	var msg bytes.Buffer
+	msg.WriteString(fmt.Sprintf("From: %s\r\n", from))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
+	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	msg.WriteString(fmt.Sprintf("Date: %s\r\n", time.Now().Format(time.RFC1123Z)))
+	msg.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	msg.WriteString("\r\n")
+	if additionalBody != "" {
+		msg.WriteString(additionalBody)
+		msg.WriteString("\r\n\r\n")
+	}
+	msg.WriteString("---------- Forwarded message ----------\r\n")
+	msg.WriteString(fmt.Sprintf("From: %s\r\n", origHeader.Get("From")))
+	msg.WriteString(fmt.Sprintf("Date: %s\r\n", origHeader.Get("Date")))
+	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", origHeader.Get("Subject")))
+	msg.WriteString(fmt.Sprintf("To: %s\r\n", origHeader.Get("To")))
+	msg.WriteString("\r\n")
+	msg.WriteString(origBody)
+
+	return c.sendMsgViaSMTP(from, to, msg.Bytes())
+}
+
+// ListDrafts returns recent drafts from [Gmail]/Drafts.
+func (c *GmailClient) ListDrafts(ctx context.Context, count int) ([]EmailSummary, error) {
+	return c.listEmailsFromFolder(ctx, "[Gmail]/Drafts", count)
+}
+
+// StarEmail adds or removes the \Flagged (starred) flag on an email in INBOX.
+func (c *GmailClient) StarEmail(ctx context.Context, uid uint32, star bool) error {
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return err
+	}
+	defer imapClient.Logout()
+
+	if _, err := imapClient.Select("INBOX", false); err != nil {
+		return fmt.Errorf("failed to select INBOX: %w", err)
+	}
+
+	seqset := new(imap.SeqSet)
+	seqset.AddNum(uid)
+
+	var op imap.FlagsOp
+	if star {
+		op = imap.AddFlags
+	} else {
+		op = imap.RemoveFlags
+	}
+
+	item := imap.FormatFlagsOp(op, true)
+	return imapClient.UidStore(seqset, item, []interface{}{imap.FlaggedFlag}, nil)
+}
+
+// GetAttachments lists all attachments for the given email UID.
+func (c *GmailClient) GetAttachments(ctx context.Context, uid uint32) ([]AttachmentInfo, error) {
+	if !c.settings.AllowReceive {
+		return nil, fmt.Errorf("blocked: receiving emails is not allowed (enable with GMAIL_ALLOW_RECEIVE=true)")
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return nil, err
+	}
+
+	rawData, err := c.fetchRawEmail(imapClient, uid, "INBOX")
+	imapClient.Logout()
+	if err != nil {
+		return nil, err
+	}
+
+	parts := extractMIMEAttachments(rawData)
+	infos := make([]AttachmentInfo, 0, len(parts))
+	for _, p := range parts {
+		infos = append(infos, AttachmentInfo{
+			Filename:    p.filename,
+			ContentType: p.contentType,
+			Size:        len(p.data),
+		})
+	}
+	return infos, nil
+}
+
+// DownloadAttachment retrieves the raw bytes of a named attachment from an email.
+func (c *GmailClient) DownloadAttachment(ctx context.Context, uid uint32, filename string) (*AttachmentData, error) {
+	if !c.settings.AllowReceive {
+		return nil, fmt.Errorf("blocked: receiving emails is not allowed (enable with GMAIL_ALLOW_RECEIVE=true)")
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return nil, err
+	}
+
+	rawData, err := c.fetchRawEmail(imapClient, uid, "INBOX")
+	imapClient.Logout()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, p := range extractMIMEAttachments(rawData) {
+		if strings.EqualFold(p.filename, filename) {
+			return &AttachmentData{
+				Filename:    p.filename,
+				ContentType: p.contentType,
+				Data:        p.data,
+			}, nil
+		}
+	}
+	return nil, fmt.Errorf("attachment %q not found in email UID %d", filename, uid)
+}
+
+// EmptyTrash permanently deletes all emails in [Gmail]/Trash.
+func (c *GmailClient) EmptyTrash(ctx context.Context) error {
+	if !c.settings.AllowSend {
+		return fmt.Errorf("blocked: emptying trash is not allowed (enable with GMAIL_ALLOW_SEND=true)")
+	}
+
+	imapClient, err := c.getIMAPClient()
+	if err != nil {
+		return err
+	}
+	defer imapClient.Logout()
+
+	mbox, err := imapClient.Select("[Gmail]/Trash", false)
+	if err != nil {
+		return fmt.Errorf("failed to select Trash: %w", err)
+	}
+	if mbox.Messages == 0 {
+		return nil
+	}
+
+	seqset := new(imap.SeqSet)
+	seqset.AddRange(1, mbox.Messages)
+
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	if err := imapClient.Store(seqset, item, []interface{}{imap.DeletedFlag}, nil); err != nil {
+		return fmt.Errorf("failed to mark messages for deletion: %w", err)
+	}
+
+	return imapClient.Expunge(nil)
 }
