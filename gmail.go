@@ -82,10 +82,18 @@ func parseEmailSettings() (*EmailSettings, error) {
 	settings.Email = os.Getenv("GMAIL_EMAIL")
 	settings.Password = os.Getenv("GMAIL_PASSWORD")
 	settings.AccessToken = os.Getenv("GOOGLE_ACCESS_TOKEN")
-	// When connected via OAuth the user may not set GMAIL_EMAIL; fall back to the
-	// account email captured during the OAuth grant.
+	// When connected via OAuth the user may not set GMAIL_EMAIL. Fall back to the
+	// email captured during the grant, then to a live userinfo lookup with the
+	// token — so an OAuth connection alone fully configures the plugin.
 	if settings.Email == "" {
 		settings.Email = os.Getenv("GOOGLE_OAUTH_EMAIL")
+	}
+	if settings.Email == "" && settings.AccessToken != "" {
+		if em, err := fetchGoogleEmail(settings.AccessToken); err == nil {
+			settings.Email = em
+		} else {
+			log.Printf("Warning: could not resolve account email from OAuth token: %v", err)
+		}
 	}
 
 	settings.IMAPHost = os.Getenv("GMAIL_IMAP_HOST")
