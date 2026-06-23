@@ -79,15 +79,11 @@ func parseEmailSettings() (*EmailSettings, error) {
 	loadDotEnv()
 	settings := DefaultEmailSettings()
 
-	settings.Email = os.Getenv("GMAIL_EMAIL")
-	settings.Password = os.Getenv("GMAIL_PASSWORD")
+	// OAuth-only: the access token is injected by oido-core after the user connects
+	// their Google account. The account email is resolved from the grant or a live
+	// userinfo lookup, so no email/password configuration is needed.
 	settings.AccessToken = os.Getenv("GOOGLE_ACCESS_TOKEN")
-	// When connected via OAuth the user may not set GMAIL_EMAIL. Fall back to the
-	// email captured during the grant, then to a live userinfo lookup with the
-	// token — so an OAuth connection alone fully configures the plugin.
-	if settings.Email == "" {
-		settings.Email = os.Getenv("GOOGLE_OAUTH_EMAIL")
-	}
+	settings.Email = os.Getenv("GOOGLE_OAUTH_EMAIL")
 	if settings.Email == "" && settings.AccessToken != "" {
 		if em, err := fetchGoogleEmail(settings.AccessToken); err == nil {
 			settings.Email = em
@@ -139,8 +135,8 @@ func parseEmailSettings() (*EmailSettings, error) {
 		}
 	}
 
-	if settings.Email == "" || (settings.Password == "" && settings.AccessToken == "") {
-		log.Println("Warning: Gmail not configured. Set GMAIL_EMAIL + GMAIL_PASSWORD, or connect via Google OAuth. Tools will return errors until configured.")
+	if settings.AccessToken == "" {
+		log.Println("Warning: Gmail not connected. Connect your Google account in the extension settings. Tools will return errors until connected.")
 	}
 
 	return settings, nil
@@ -179,17 +175,17 @@ func NewGmailClient() (*GmailClient, error) {
 	return &GmailClient{settings: settings}, nil
 }
 
-// TestConnection tests the IMAP connection and password, logging the result.
+// TestConnection tests the IMAP connection via OAuth, logging the result.
 func (c *GmailClient) TestConnection() {
-	if c.settings.Email == "" || c.settings.Password == "" {
-		log.Printf("IMAP connection SKIPPED - Gmail not configured")
+	if c.settings.AccessToken == "" {
+		log.Printf("IMAP connection SKIPPED - Gmail not connected (no OAuth token)")
 		return
 	}
 	log.Printf("Testing IMAP connection to %s:%d...", c.settings.IMAPHost, c.settings.IMAPPort)
 	client, err := c.getIMAPClient()
 	if err != nil {
 		log.Printf("IMAP connection FAILED: %v", err)
-		log.Printf("Check your GMAIL_EMAIL, GMAIL_PASSWORD, and ensure IMAP is enabled in Gmail settings.")
+		log.Printf("Reconnect your Google account and ensure the https://mail.google.com/ scope was granted.")
 		return
 	}
 	client.Logout()
@@ -198,8 +194,11 @@ func (c *GmailClient) TestConnection() {
 
 // getIMAPClient connects to the IMAP server and returns an authenticated client.
 func (c *GmailClient) getIMAPClient() (*client.Client, error) {
-	if c.settings.Email == "" || (c.settings.Password == "" && c.settings.AccessToken == "") {
-		return nil, fmt.Errorf("Gmail not configured: set GMAIL_EMAIL and GMAIL_PASSWORD, or connect via Google OAuth")
+	if c.settings.AccessToken == "" {
+		return nil, fmt.Errorf("Gmail not connected: connect your Google account in the extension settings")
+	}
+	if c.settings.Email == "" {
+		return nil, fmt.Errorf("Gmail OAuth token present but the account email could not be resolved — reconnect your Google account (the token may be expired or missing the email scope)")
 	}
 
 	addr := fmt.Sprintf("%s:%d", c.settings.IMAPHost, c.settings.IMAPPort)
@@ -211,15 +210,9 @@ func (c *GmailClient) getIMAPClient() (*client.Client, error) {
 		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
 	}
 
-	// Prefer OAuth2 (XOAUTH2) when an access token is present; else app password.
-	if c.settings.AccessToken != "" {
-		if err := imapClient.Authenticate(&imapXOAuth2{email: c.settings.Email, token: c.settings.AccessToken}); err != nil {
-			imapClient.Logout()
-			return nil, fmt.Errorf("IMAP XOAUTH2 auth failed: %w", err)
-		}
-	} else if err := imapClient.Login(c.settings.Email, c.settings.Password); err != nil {
+	if err := imapClient.Authenticate(&imapXOAuth2{email: c.settings.Email, token: c.settings.AccessToken}); err != nil {
 		imapClient.Logout()
-		return nil, fmt.Errorf("IMAP login failed: %w", err)
+		return nil, fmt.Errorf("IMAP XOAUTH2 auth failed (reconnect Google; ensure the mail scope was granted): %w", err)
 	}
 
 	return imapClient, nil
@@ -726,13 +719,11 @@ func (c *GmailClient) sendMsgViaSMTP(from, to string, msg []byte) error {
 	if from == "" {
 		from = c.settings.Email
 	}
-	addr := fmt.Sprintf("%s:%d", c.settings.SMTPHost, c.settings.SMTPPort)
-	var auth smtp.Auth
-	if c.settings.AccessToken != "" {
-		auth = &smtpXOAuth2{email: c.settings.Email, token: c.settings.AccessToken}
-	} else {
-		auth = smtp.PlainAuth("", c.settings.Email, c.settings.Password, c.settings.SMTPHost)
+	if c.settings.AccessToken == "" || c.settings.Email == "" {
+		return fmt.Errorf("Gmail not connected: connect your Google account in the extension settings")
 	}
+	addr := fmt.Sprintf("%s:%d", c.settings.SMTPHost, c.settings.SMTPPort)
+	var auth smtp.Auth = &smtpXOAuth2{email: c.settings.Email, token: c.settings.AccessToken}
 
 	if c.settings.SMTPPort == 465 {
 		return c.sendSMTPS(addr, auth, from, to, msg)
