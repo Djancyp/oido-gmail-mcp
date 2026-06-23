@@ -1,8 +1,8 @@
 {
   "name": "oido-gmail",
   "version": "1.0.0",
-  "description": "Send, receive, and search emails via IMAP/SMTP using MCP server.",
-	"runtime": "make build",
+  "description": "Send, receive, and search emails via IMAP/SMTP using MCP server. Auth with a Gmail App Password or your own Google OAuth connection.",
+  "runtime": "make build",
   "mcpServers": {
     "oido-gmail": {
       "command": "${extensionPath}/oido-gmail-mcp",
@@ -10,6 +10,10 @@
       "env": {
         "GMAIL_EMAIL": "${GMAIL_EMAIL}",
         "GMAIL_PASSWORD": "${GMAIL_PASSWORD}",
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GOOGLE_ACCESS_TOKEN": "${GOOGLE_ACCESS_TOKEN}",
+        "GOOGLE_OAUTH_EMAIL": "${GOOGLE_OAUTH_EMAIL}",
         "GMAIL_IMAP_HOST": "${GMAIL_IMAP_HOST}",
         "GMAIL_IMAP_PORT": "${GMAIL_IMAP_PORT}",
         "GMAIL_SMTP_HOST": "${GMAIL_SMTP_HOST}",
@@ -30,9 +34,37 @@
     },
     {
       "name": "GMAIL_PASSWORD",
-      "description": "App password for IMAP/SMTP authentication (use Gmail App Password, not account password)",
+      "description": "App password (optional if you connect via Google OAuth below). Use a Gmail App Password, not your account password.",
       "defaultValue": "",
-      "type": "string"
+      "type": "string",
+      "sensitive": true
+    },
+    {
+      "name": "GOOGLE_CLIENT_ID",
+      "description": "Google OAuth client ID (only if authenticating with OAuth instead of an app password)",
+      "defaultValue": "",
+      "type": "string",
+      "sensitive": true
+    },
+    {
+      "name": "GOOGLE_CLIENT_SECRET",
+      "description": "Google OAuth client secret",
+      "defaultValue": "",
+      "type": "string",
+      "sensitive": true
+    },
+    {
+      "name": "GOOGLE_OAUTH",
+      "description": "Connect your Google account for IMAP/SMTP access (alternative to an app password)",
+      "type": "oauth2",
+      "provider": "google",
+      "scopes": [
+        "https://mail.google.com/",
+        "https://www.googleapis.com/auth/userinfo.email"
+      ],
+      "clientIdKey": "GOOGLE_CLIENT_ID",
+      "clientSecretKey": "GOOGLE_CLIENT_SECRET",
+      "tokenKey": "GOOGLE_ACCESS_TOKEN"
     },
     {
       "name": "GMAIL_IMAP_HOST",

@@ -27,6 +27,7 @@ import (
 type EmailSettings struct {
 	Email        string
 	Password     string
+	AccessToken  string // OAuth2 access token (XOAUTH2); preferred over Password
 	IMAPHost     string
 	IMAPPort     int
 	SMTPHost     string
@@ -80,6 +81,12 @@ func parseEmailSettings() (*EmailSettings, error) {
 
 	settings.Email = os.Getenv("GMAIL_EMAIL")
 	settings.Password = os.Getenv("GMAIL_PASSWORD")
+	settings.AccessToken = os.Getenv("GOOGLE_ACCESS_TOKEN")
+	// When connected via OAuth the user may not set GMAIL_EMAIL; fall back to the
+	// account email captured during the OAuth grant.
+	if settings.Email == "" {
+		settings.Email = os.Getenv("GOOGLE_OAUTH_EMAIL")
+	}
 
 	settings.IMAPHost = os.Getenv("GMAIL_IMAP_HOST")
 	if settings.IMAPHost == "" {
@@ -124,8 +131,8 @@ func parseEmailSettings() (*EmailSettings, error) {
 		}
 	}
 
-	if settings.Email == "" || settings.Password == "" {
-		log.Println("Warning: GMAIL_EMAIL or GMAIL_PASSWORD not set. Tools will return errors until configured.")
+	if settings.Email == "" || (settings.Password == "" && settings.AccessToken == "") {
+		log.Println("Warning: Gmail not configured. Set GMAIL_EMAIL + GMAIL_PASSWORD, or connect via Google OAuth. Tools will return errors until configured.")
 	}
 
 	return settings, nil
@@ -183,8 +190,8 @@ func (c *GmailClient) TestConnection() {
 
 // getIMAPClient connects to the IMAP server and returns an authenticated client.
 func (c *GmailClient) getIMAPClient() (*client.Client, error) {
-	if c.settings.Email == "" || c.settings.Password == "" {
-		return nil, fmt.Errorf("Gmail not configured: set GMAIL_EMAIL and GMAIL_PASSWORD")
+	if c.settings.Email == "" || (c.settings.Password == "" && c.settings.AccessToken == "") {
+		return nil, fmt.Errorf("Gmail not configured: set GMAIL_EMAIL and GMAIL_PASSWORD, or connect via Google OAuth")
 	}
 
 	addr := fmt.Sprintf("%s:%d", c.settings.IMAPHost, c.settings.IMAPPort)
@@ -196,7 +203,13 @@ func (c *GmailClient) getIMAPClient() (*client.Client, error) {
 		return nil, fmt.Errorf("failed to connect to IMAP server: %w", err)
 	}
 
-	if err := imapClient.Login(c.settings.Email, c.settings.Password); err != nil {
+	// Prefer OAuth2 (XOAUTH2) when an access token is present; else app password.
+	if c.settings.AccessToken != "" {
+		if err := imapClient.Authenticate(&imapXOAuth2{email: c.settings.Email, token: c.settings.AccessToken}); err != nil {
+			imapClient.Logout()
+			return nil, fmt.Errorf("IMAP XOAUTH2 auth failed: %w", err)
+		}
+	} else if err := imapClient.Login(c.settings.Email, c.settings.Password); err != nil {
 		imapClient.Logout()
 		return nil, fmt.Errorf("IMAP login failed: %w", err)
 	}
@@ -706,7 +719,12 @@ func (c *GmailClient) sendMsgViaSMTP(from, to string, msg []byte) error {
 		from = c.settings.Email
 	}
 	addr := fmt.Sprintf("%s:%d", c.settings.SMTPHost, c.settings.SMTPPort)
-	auth := smtp.PlainAuth("", c.settings.Email, c.settings.Password, c.settings.SMTPHost)
+	var auth smtp.Auth
+	if c.settings.AccessToken != "" {
+		auth = &smtpXOAuth2{email: c.settings.Email, token: c.settings.AccessToken}
+	} else {
+		auth = smtp.PlainAuth("", c.settings.Email, c.settings.Password, c.settings.SMTPHost)
+	}
 
 	if c.settings.SMTPPort == 465 {
 		return c.sendSMTPS(addr, auth, from, to, msg)
