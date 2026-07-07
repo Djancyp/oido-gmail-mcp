@@ -12,10 +12,6 @@
         "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
         "GOOGLE_ACCESS_TOKEN": "${GOOGLE_ACCESS_TOKEN}",
         "GOOGLE_OAUTH_EMAIL": "${GOOGLE_OAUTH_EMAIL}",
-        "GMAIL_IMAP_HOST": "${GMAIL_IMAP_HOST}",
-        "GMAIL_IMAP_PORT": "${GMAIL_IMAP_PORT}",
-        "GMAIL_SMTP_HOST": "${GMAIL_SMTP_HOST}",
-        "GMAIL_SMTP_PORT": "${GMAIL_SMTP_PORT}",
         "GMAIL_ALLOW_SEND": "${GMAIL_ALLOW_SEND}",
         "GMAIL_ALLOW_RECEIVE": "${GMAIL_ALLOW_RECEIVE}"
       }
@@ -50,30 +46,6 @@
       "clientIdKey": "GOOGLE_CLIENT_ID",
       "clientSecretKey": "GOOGLE_CLIENT_SECRET",
       "tokenKey": "GOOGLE_ACCESS_TOKEN"
-    },
-    {
-      "name": "GMAIL_IMAP_HOST",
-      "description": "IMAP server host",
-      "defaultValue": "imap.gmail.com",
-      "type": "string"
-    },
-    {
-      "name": "GMAIL_IMAP_PORT",
-      "description": "IMAP server port",
-      "defaultValue": "993",
-      "type": "string"
-    },
-    {
-      "name": "GMAIL_SMTP_HOST",
-      "description": "SMTP server host",
-      "defaultValue": "smtp.gmail.com",
-      "type": "string"
-    },
-    {
-      "name": "GMAIL_SMTP_PORT",
-      "description": "SMTP server port",
-      "defaultValue": "587",
-      "type": "string"
     },
     {
       "name": "GMAIL_ALLOW_SEND",

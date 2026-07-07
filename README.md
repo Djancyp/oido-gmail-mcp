@@ -7,7 +7,7 @@ Send, receive, search, and list emails via IMAP/SMTP using the Model Context Pro
 - **List Emails**: View recent inbox messages
 - **Read Emails**: Fetch full email content by UID
 - **Send Emails**: Compose and send messages via SMTP
-- **Search Emails**: Filter inbox by subject keyword
+- **Search Emails**: Full Gmail search syntax (is:unread, from:, label:, has:attachment, dates, free text)
 - **Save Drafts**: Compose and save draft emails without sending
 
 ## Installation
@@ -101,7 +101,7 @@ Send an email (requires `GMAIL_ALLOW_SEND=true`).
 Save an email as a draft (requires `GMAIL_ALLOW_SEND=true`).
 
 ### `search_emails`
-Search emails by subject.
+Search emails with full Gmail query syntax (`is:unread`, `from:`, `has:attachment`, `newer_than:7d`, ...).
 
 ## Architecture
 

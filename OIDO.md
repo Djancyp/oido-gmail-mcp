@@ -41,13 +41,13 @@ Save an email as a draft in [Gmail]/Drafts via IMAP.
 **Returns:** Success confirmation that draft was saved.
 
 ### `search_emails`
-Search emails by subject in the INBOX.
+Search INBOX emails using full Gmail search syntax.
 
 **Parameters:**
-- `query` (string, required): Search term to match in email subject
+- `query` (string, required): Gmail search query — `is:unread`, `is:starred`, `from:`, `to:`, `subject:`, `label:`, `has:attachment`, `newer_than:7d`, free text, or any combination
 - `count` (number, optional): Maximum number of results to return (default: 20)
 
-**Returns:** Formatted table with matching emails (UID, From, Date, Subject).
+**Returns:** Formatted table with matching emails (UID, Status, From, Date, Subject).
 
 ## Example Usage
 

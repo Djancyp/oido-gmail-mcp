@@ -10,13 +10,13 @@ import (
 // configJSON holds settings parsed from --config flag.
 // Field names match env var names for simple mapping.
 type configJSON struct {
-	GMAIL_EMAIL        string `json:"GMAIL_EMAIL"`
-	GMAIL_PASSWORD     string `json:"GMAIL_PASSWORD"`
-	GMAIL_IMAP_HOST    string `json:"GMAIL_IMAP_HOST"`
-	GMAIL_IMAP_PORT    string `json:"GMAIL_IMAP_PORT"`
-	GMAIL_SMTP_HOST    string `json:"GMAIL_SMTP_HOST"`
-	GMAIL_SMTP_PORT    string `json:"GMAIL_SMTP_PORT"`
-	GMAIL_ALLOW_SEND   string `json:"GMAIL_ALLOW_SEND"`
+	GMAIL_EMAIL         string `json:"GMAIL_EMAIL"`
+	GMAIL_PASSWORD      string `json:"GMAIL_PASSWORD"`
+	GMAIL_IMAP_HOST     string `json:"GMAIL_IMAP_HOST"`
+	GMAIL_IMAP_PORT     string `json:"GMAIL_IMAP_PORT"`
+	GMAIL_SMTP_HOST     string `json:"GMAIL_SMTP_HOST"`
+	GMAIL_SMTP_PORT     string `json:"GMAIL_SMTP_PORT"`
+	GMAIL_ALLOW_SEND    string `json:"GMAIL_ALLOW_SEND"`
 	GMAIL_ALLOW_RECEIVE string `json:"GMAIL_ALLOW_RECEIVE"`
 }
 

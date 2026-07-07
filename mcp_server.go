@@ -47,7 +47,7 @@ type SaveDraftArgs struct {
 
 // SearchEmailsArgs represents the arguments for search_emails tool.
 type SearchEmailsArgs struct {
-	Query string `json:"query" jsonschema:"Search term to match in email subject"`
+	Query string `json:"query" jsonschema:"Gmail search query. Supports full Gmail syntax: is:unread, is:starred, from:alice@example.com, to:, subject:, label:work, has:attachment, newer_than:7d, after:2026/01/01, plus free text. Operators can be combined, e.g. 'is:unread from:boss@co.com'"`
 	Count int    `json:"count" jsonschema:"Maximum number of results to return (default: 20)"`
 }
 
@@ -156,7 +156,7 @@ func RunMCPServer() {
 	// Register gmail_search_emails tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_search_emails",
-		Description: "Search emails by subject in the INBOX. Returns matching emails with subject, from, date, and UID.",
+		Description: "Search INBOX emails using full Gmail search syntax (is:unread, from:, to:, subject:, label:, has:attachment, newer_than:7d, free text). Returns matching emails with subject, from, date, read status, and UID.",
 	}, handler.HandleSearchEmails)
 
 	// Register gmail_delete_email tool
@@ -268,15 +268,7 @@ func (h *MCPHandler) HandleListEmails(ctx context.Context, req *mcp.CallToolRequ
 
 	var result string
 	result += fmt.Sprintf("Recent Emails (%d):\n\n", len(emails))
-	result += "UID    | From                        | Date                        | Subject\n"
-	result += "-------+-----------------------------+-----------------------------+---------------------------\n"
-
-	for _, e := range emails {
-		from := truncate(e.From, 27)
-		date := truncate(e.Date, 27)
-		subject := truncate(e.Subject, 25)
-		result += fmt.Sprintf("%-6d | %-27s | %-27s | %s\n", e.UID, from, date, subject)
-	}
+	result += emailTable(emails)
 
 	result += "\nUse gmail_read_email with a UID to view full message content."
 
@@ -446,15 +438,7 @@ func (h *MCPHandler) HandleSearchEmails(ctx context.Context, req *mcp.CallToolRe
 
 	var result string
 	result += fmt.Sprintf("Search Results for \"%s\" (%d):\n\n", args.Query, len(emails))
-	result += "UID    | From                        | Date                        | Subject\n"
-	result += "-------+-----------------------------+-----------------------------+---------------------------\n"
-
-	for _, e := range emails {
-		from := truncate(e.From, 27)
-		date := truncate(e.Date, 27)
-		subject := truncate(e.Subject, 25)
-		result += fmt.Sprintf("%-6d | %-27s | %-27s | %s\n", e.UID, from, date, subject)
-	}
+	result += emailTable(emails)
 
 	result += "\nUse gmail_read_email with a UID to view full message content."
 
@@ -662,6 +646,21 @@ func mcpErr(msg string) *mcp.CallToolResult {
 		Content: []mcp.Content{&mcp.TextContent{Text: "Error: " + msg}},
 		IsError: true,
 	}
+}
+
+// emailTable renders email summaries as a fixed-width table with read status.
+func emailTable(emails []EmailSummary) string {
+	result := "UID    | Status | From                        | Date                        | Subject\n"
+	result += "-------+--------+-----------------------------+-----------------------------+---------------------------\n"
+	for _, e := range emails {
+		status := "unread"
+		if e.Seen {
+			status = "read"
+		}
+		result += fmt.Sprintf("%-6d | %-6s | %-27s | %-27s | %s\n",
+			e.UID, status, truncate(e.From, 27), truncate(e.Date, 27), truncate(e.Subject, 25))
+	}
+	return result
 }
 
 // truncate shortens a string to maxLen characters.

@@ -101,21 +101,27 @@ Returns success confirmation with recipient address.
 
 ### `search_emails`
 
-Search emails by subject in the INBOX.
+Search INBOX emails using full Gmail search syntax.
 
 **Parameters:**
-- `query` (string, required): Search term to match in email subject
+- `query` (string, required): Gmail search query. Supports operators like `is:unread`, `is:starred`, `from:`, `to:`, `subject:`, `label:`, `has:attachment`, `newer_than:7d`, `after:2026/01/01`, plus free text. Operators can be combined.
 - `count` (number, optional): Maximum number of results to return (default: 20)
 
 **When to use:**
 - User asks to search for emails
-- User wants to find emails about a specific topic
-- User wants to filter inbox by keyword
+- User wants unread, starred, or labeled emails
+- User wants to filter by sender, date, attachments, or keyword
 
 **Example Usage:**
 ```
 User: "Find emails about 'invoice'"
 → Call search_emails with query: "invoice"
+
+User: "Show my unread emails from Alice"
+→ Call search_emails with query: "is:unread from:alice@example.com"
+
+User: "Emails with attachments from last week"
+→ Call search_emails with query: "has:attachment newer_than:7d"
 ```
 
 **Response Format:**
@@ -217,7 +223,7 @@ Draft saved successfully for bob@example.com
 - **SMTP only**: Sends via SMTP with STARTTLS or SMTPS
 - **Plain text bodies**: Only plain text email bodies are read (HTML stripped)
 - **INBOX only**: Only reads from INBOX mailbox (no folder navigation)
-- **Subject search only**: Search matches only the subject field (not body)
+- **Gmail search syntax**: Search uses Gmail's X-GM-RAW extension; on non-Gmail IMAP servers it falls back to subject-only matching
 - Requires environment variables: GMAIL_EMAIL, GMAIL_PASSWORD
 - **Gmail App Password**: Use a Gmail App Password, not your regular account password
 - **Permission controls**: GMAIL_ALLOW_SEND (default: false), GMAIL_ALLOW_RECEIVE (default: true)
@@ -228,7 +234,7 @@ Draft saved successfully for bob@example.com
 - `/list-emails` - List recent emails (custom command)
 - `/read-email` - Read full email content (custom command)
 - `/send-email` - Send an email (custom command)
-- `/search-emails` - Search emails by subject (custom command)
+- `/search-emails` - Search emails with Gmail query syntax (custom command)
 - `/save-draft` - Save an email as draft (custom command)
 
 ## Triggers

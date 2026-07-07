@@ -21,6 +21,7 @@ import (
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
+	"github.com/emersion/go-imap/responses"
 )
 
 // EmailSettings holds configuration for email access.
@@ -396,13 +397,17 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 		return []EmailSummary{}, nil
 	}
 
-	// Build search criteria
-	criteria := imap.NewSearchCriteria()
-	criteria.Header.Add("Subject", query)
-
-	seqnums, err := imapClient.Search(criteria)
+	// Gmail's X-GM-RAW extension accepts full Gmail search syntax
+	// (is:unread, from:, to:, label:, has:attachment, newer_than:7d, ...).
+	seqnums, err := rawGmailSearch(imapClient, query)
 	if err != nil {
-		return nil, fmt.Errorf("search failed: %w", err)
+		// ponytail: fallback to plain subject search for non-Gmail IMAP servers
+		criteria := imap.NewSearchCriteria()
+		criteria.Header.Add("Subject", query)
+		seqnums, err = imapClient.Search(criteria)
+		if err != nil {
+			return nil, fmt.Errorf("search failed: %w", err)
+		}
 	}
 
 	if len(seqnums) == 0 {
@@ -425,7 +430,7 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 			Specifier: imap.HeaderSpecifier,
 		},
 	}
-	items := []imap.FetchItem{imap.FetchUid, headerSection.FetchItem()}
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchFlags, headerSection.FetchItem()}
 
 	messages := make(chan *imap.Message, len(seqnums))
 	go func() {
@@ -439,6 +444,12 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 		}
 
 		summary := EmailSummary{UID: msg.Uid}
+		for _, flag := range msg.Flags {
+			if flag == imap.SeenFlag {
+				summary.Seen = true
+				break
+			}
+		}
 
 		r := msg.GetBody(headerSection)
 		if r != nil {
@@ -457,6 +468,23 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 	}
 
 	return summaries, nil
+}
+
+// rawGmailSearch runs SEARCH X-GM-RAW <query>, giving full Gmail search syntax.
+func rawGmailSearch(imapClient *client.Client, query string) ([]uint32, error) {
+	cmd := &imap.Command{
+		Name:      "SEARCH",
+		Arguments: []interface{}{imap.RawString("X-GM-RAW"), query},
+	}
+	res := new(responses.Search)
+	status, err := imapClient.Execute(cmd, res)
+	if err != nil {
+		return nil, err
+	}
+	if err := status.Err(); err != nil {
+		return nil, err
+	}
+	return res.Ids, nil
 }
 
 // SaveDraft saves an email as a draft in [Gmail]/Drafts via IMAP APPEND.
