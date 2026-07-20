@@ -1,4 +1,5 @@
 *.zip
 *-mcp
+oido-gmail
 dist/
 .env
