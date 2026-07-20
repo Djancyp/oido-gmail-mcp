@@ -390,7 +390,10 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 
 	// Search across All Mail (inbox + sent + archived), not just INBOX — otherwise
 	// X-GM-RAW is scoped to the selected mailbox and can't see sent/archived mail.
-	mailbox := resolveAllMail(imapClient)
+	mailbox, err := resolveAllMail(imapClient)
+	if err != nil {
+		return nil, err
+	}
 	mbox, err := imapClient.Select(mailbox, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to select %s: %w", mailbox, err)
@@ -474,21 +477,37 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 }
 
 // resolveAllMail finds the "All Mail" mailbox via the \All special-use attribute
-// (RFC 6154), which is language-independent. Falls back to the canonical English
-// name if the server doesn't advertise the attribute.
-func resolveAllMail(imapClient *client.Client) string {
+// (RFC 6154), which is language-independent. Falls back to matching by name, and
+// otherwise returns an actionable error listing the mailboxes the account exposes.
+func resolveAllMail(imapClient *client.Client) (string, error) {
 	mailboxes := make(chan *imap.MailboxInfo, 100)
+	done := make(chan error, 1)
 	go func() {
-		_ = imapClient.List("", "*", mailboxes)
+		done <- imapClient.List("", "*", mailboxes)
 	}()
+
+	var names []string
+	var byName string
 	for mbox := range mailboxes {
+		names = append(names, mbox.Name)
 		for _, attr := range mbox.Attributes {
 			if attr == imap.AllAttr {
-				return mbox.Name
+				return mbox.Name, nil // best signal: language-independent
 			}
 		}
+		if strings.HasSuffix(mbox.Name, "All Mail") {
+			byName = mbox.Name // fallback if server omits the \All attribute
+		}
 	}
-	return "[Gmail]/All Mail" // ponytail: fallback for non-Gmail or non-English accounts
+	if err := <-done; err != nil {
+		return "", fmt.Errorf("failed to list mailboxes: %w", err)
+	}
+	if byName != "" {
+		return byName, nil
+	}
+	return "", fmt.Errorf("no All Mail mailbox (\\All) exposed via IMAP; "+
+		"enable it under Gmail Settings > Labels > 'All Mail' > Show in IMAP. Available mailboxes: %s",
+		strings.Join(names, ", "))
 }
 
 // rawGmailSearch runs SEARCH X-GM-RAW <query>, giving full Gmail search syntax.
