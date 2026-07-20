@@ -388,9 +388,12 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 	}
 	defer imapClient.Logout()
 
-	mbox, err := imapClient.Select("INBOX", true)
+	// Search across All Mail (inbox + sent + archived), not just INBOX — otherwise
+	// X-GM-RAW is scoped to the selected mailbox and can't see sent/archived mail.
+	mailbox := resolveAllMail(imapClient)
+	mbox, err := imapClient.Select(mailbox, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to select INBOX: %w", err)
+		return nil, fmt.Errorf("failed to select %s: %w", mailbox, err)
 	}
 
 	if mbox.Messages == 0 {
@@ -468,6 +471,24 @@ func (c *GmailClient) SearchEmails(ctx context.Context, query string, count int)
 	}
 
 	return summaries, nil
+}
+
+// resolveAllMail finds the "All Mail" mailbox via the \All special-use attribute
+// (RFC 6154), which is language-independent. Falls back to the canonical English
+// name if the server doesn't advertise the attribute.
+func resolveAllMail(imapClient *client.Client) string {
+	mailboxes := make(chan *imap.MailboxInfo, 100)
+	go func() {
+		_ = imapClient.List("", "*", mailboxes)
+	}()
+	for mbox := range mailboxes {
+		for _, attr := range mbox.Attributes {
+			if attr == imap.AllAttr {
+				return mbox.Name
+			}
+		}
+	}
+	return "[Gmail]/All Mail" // ponytail: fallback for non-Gmail or non-English accounts
 }
 
 // rawGmailSearch runs SEARCH X-GM-RAW <query>, giving full Gmail search syntax.

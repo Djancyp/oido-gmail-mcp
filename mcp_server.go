@@ -111,6 +111,16 @@ type DownloadAttachmentArgs struct {
 // EmptyTrashArgs represents the arguments for gmail_empty_trash tool (no parameters).
 type EmptyTrashArgs struct{}
 
+// Tool annotation presets: hints MCP clients use to gate confirmation prompts.
+var (
+	falseVal       = false
+	trueVal        = true
+	annReadOnly    = &mcp.ToolAnnotations{ReadOnlyHint: true}
+	annAdditive    = &mcp.ToolAnnotations{DestructiveHint: &falseVal}                       // sends/creates mail, never removes
+	annFlag        = &mcp.ToolAnnotations{DestructiveHint: &falseVal, IdempotentHint: true} // toggles flags, safe to repeat
+	annDestructive = &mcp.ToolAnnotations{DestructiveHint: &trueVal, IdempotentHint: true}  // deletes or moves mail
+)
+
 // RunMCPServer starts the MCP server using stdio transport.
 func RunMCPServer() {
 	gmailClient, err := NewGmailClient()
@@ -133,108 +143,126 @@ func RunMCPServer() {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_list_emails",
 		Description: "List recent emails from the INBOX. Returns subject, from, date, and UID for each email.",
+		Annotations: annReadOnly,
 	}, handler.HandleListEmails)
 
 	// Register gmail_read_email tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_read_email",
 		Description: "Read the full content of a specific email by UID. Returns subject, from, to, date, and body.",
+		Annotations: annReadOnly,
 	}, handler.HandleReadEmail)
 
 	// Register gmail_send_email tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_send_email",
 		Description: "Send an email via SMTP. Requires recipient address, subject, and body.",
+		Annotations: annAdditive,
 	}, handler.HandleSendEmail)
 
 	// Register gmail_save_draft tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_save_draft",
 		Description: "Save an email as a draft in [Gmail]/Drafts. Requires recipient address, subject, and body. Requires GMAIL_ALLOW_SEND=true.",
+		Annotations: annAdditive,
 	}, handler.HandleSaveDraft)
 
 	// Register gmail_search_emails tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_search_emails",
-		Description: "Search INBOX emails using full Gmail search syntax (is:unread, from:, to:, subject:, label:, has:attachment, newer_than:7d, free text). Returns matching emails with subject, from, date, read status, and UID.",
+		Description: "Search all mail (inbox, sent, and archived) using full Gmail search syntax (is:unread, in:sent, from:, to:, subject:, label:, has:attachment, newer_than:7d, free text). Returns matching emails with subject, from, date, read status, and UID.",
+		Annotations: annReadOnly,
 	}, handler.HandleSearchEmails)
 
 	// Register gmail_delete_email tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_delete_email",
 		Description: "Move an email to [Gmail]/Trash by UID. Requires GMAIL_ALLOW_SEND=true.",
+		Annotations: annDestructive,
 	}, handler.HandleDeleteEmail)
 
 	// Register gmail_mark_read tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_mark_read",
 		Description: "Mark an email as read by UID. Optionally specify the folder (default: INBOX).",
+		Annotations: annFlag,
 	}, handler.HandleMarkRead)
 
 	// Register gmail_mark_unread tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_mark_unread",
 		Description: "Mark an email as unread by UID. Optionally specify the folder (default: INBOX).",
+		Annotations: annFlag,
 	}, handler.HandleMarkUnread)
 
 	// Register gmail_list_labels tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_list_labels",
 		Description: "List all available Gmail labels and folders (IMAP mailboxes).",
+		Annotations: annReadOnly,
 	}, handler.HandleListLabels)
 
 	// Register gmail_move_email tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_move_email",
 		Description: "Move an email from one folder to another by UID. Requires GMAIL_ALLOW_SEND=true.",
+		Annotations: annDestructive,
 	}, handler.HandleMoveEmail)
 
 	// Register gmail_reply_email tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_reply_email",
 		Description: "Send a reply to an email by UID with proper In-Reply-To headers. Requires GMAIL_ALLOW_SEND=true.",
+		Annotations: annAdditive,
 	}, handler.HandleReplyEmail)
 
 	// Register gmail_forward_email tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_forward_email",
 		Description: "Forward an email to a recipient with the original message quoted. Requires GMAIL_ALLOW_SEND=true.",
+		Annotations: annAdditive,
 	}, handler.HandleForwardEmail)
 
 	// Register gmail_list_drafts tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_list_drafts",
 		Description: "List recent drafts from [Gmail]/Drafts. Returns subject, from, date, and UID.",
+		Annotations: annReadOnly,
 	}, handler.HandleListDrafts)
 
 	// Register gmail_star_email tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_star_email",
 		Description: "Star an email by UID (adds the Flagged flag in INBOX).",
+		Annotations: annFlag,
 	}, handler.HandleStarEmail)
 
 	// Register gmail_unstar_email tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_unstar_email",
 		Description: "Remove the star from an email by UID (removes the Flagged flag in INBOX).",
+		Annotations: annFlag,
 	}, handler.HandleUnstarEmail)
 
 	// Register gmail_get_attachments tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_get_attachments",
 		Description: "List all attachments in an email by UID. Returns filename, content type, and size.",
+		Annotations: annReadOnly,
 	}, handler.HandleGetAttachments)
 
 	// Register gmail_download_attachment tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_download_attachment",
 		Description: "Download a named attachment from an email by UID. Returns base64-encoded content.",
+		Annotations: annReadOnly,
 	}, handler.HandleDownloadAttachment)
 
 	// Register gmail_empty_trash tool
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gmail_empty_trash",
 		Description: "Permanently delete all emails in [Gmail]/Trash. Requires GMAIL_ALLOW_SEND=true.",
+		Annotations: annDestructive,
 	}, handler.HandleEmptyTrash)
 
 	// Run server using stdio transport
