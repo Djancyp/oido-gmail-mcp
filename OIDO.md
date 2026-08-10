@@ -1,102 +1,109 @@
 # Oido Gmail Extension
 
-Send, receive, search, and list emails via IMAP/SMTP. This extension provides MCP tools for email management.
+Read, search, organize, draft and send email over IMAP/SMTP.
 
-## Available Tools
+## Message ids
 
-### `list_emails`
-List recent emails from the INBOX.
+Every tool that acts on a message takes an `id` from `gmail_search`. **Copy ids
+verbatim; never construct or guess one.** An id names both the message and the
+mailbox it lives in, so the same tools work on inbox, sent, archived, trashed
+and draft messages alike.
 
-**Parameters:**
-- `count` (number, optional): Number of recent emails to retrieve (default: 20)
+Ids are positional. When a message moves — including when you edit a draft — its
+old id stops working and the tool tells you so. Re-run `gmail_search` to get a
+current one. `gmail_update_draft` returns the new id directly.
 
-**Returns:** Formatted table with UID, From, Date, Subject.
+## Tools
 
-### `read_email`
-Read the full content of a specific email by UID.
+### Reading
 
-**Parameters:**
-- `uid` (number, required): Unique ID of the email to read
+| Tool | Purpose |
+| --- | --- |
+| `gmail_search(query, count)` | Search or list anywhere. Returns ids, sender, **recipient**, date, flags, attachment presence. |
+| `gmail_read(id, format)` | One message in full: headers (To, Cc, Reply-To), body, attachment list. |
+| `gmail_list_labels()` | Labels/mailboxes on the account. |
+| `gmail_download_attachment(id, filename)` | Saves the file into the workspace, returns its path. |
 
-**Returns:** Subject, From, To, Date, and full body text.
+`gmail_search` takes full Gmail syntax and replaces any separate list tool:
 
-### `send_email`
-Send an email via SMTP.
+- `in:inbox` (the default), `in:drafts`, `in:sent`, `in:trash`, `in:anywhere`
+- `is:unread`, `is:starred`, `has:attachment`
+- `from:`, `to:`, `subject:`, `label:`
+- `newer_than:7d`, `after:2026/01/01`
+- free text, combined freely: `is:unread from:boss@co.com has:attachment`
 
-**Parameters:**
-- `to` (string, required): Recipient email address
-- `subject` (string, required): Email subject line
-- `body` (string, required): Email body text
+`gmail_read`'s `format` is `text` (default), `html`, or `both`. **Use `both`
+before editing a draft** so its formatting survives the edit.
 
-**Returns:** Success confirmation with recipient address.
+### Composing
 
-### `save_draft`
-Save an email as a draft in [Gmail]/Drafts via IMAP.
+| Tool | Sends? |
+| --- | --- |
+| `gmail_save_draft(...)` | No — returns a draft id |
+| `gmail_update_draft(id, ...)` | No — returns a **new** draft id |
+| `gmail_delete_draft(id)` | No |
+| `gmail_draft_reply(id, body, reply_all)` | No |
+| `gmail_send(...)` | Yes |
+| `gmail_send_draft(id)` | Yes |
+| `gmail_reply(id, body, reply_all)` | Yes |
+| `gmail_forward(id, to, additional_body)` | Yes — carries attachments |
 
-**Parameters:**
-- `to` (string, required): Recipient email address
-- `subject` (string, required): Email subject line
-- `body` (string, required): Email body text
+Compose tools take `to`, `cc` and `bcc` as **arrays**, plus `subject`, `body`,
+optional `body_html`, and optional `attachments` (workspace-relative paths).
 
-**Returns:** Success confirmation that draft was saved.
+`gmail_update_draft` is a **partial** update: supply only what changes.
+Everything you omit — recipient, subject, Cc, Bcc, attachments — is preserved.
+So to rewrite a draft's wording you need only its id and the new `body`; you do
+**not** need to ask the user who it was addressed to. To clear a field, pass it
+explicitly empty.
 
-### `search_emails`
-Search INBOX emails using full Gmail search syntax.
+### Organizing
 
-**Parameters:**
-- `query` (string, required): Gmail search query — `is:unread`, `is:starred`, `from:`, `to:`, `subject:`, `label:`, `has:attachment`, `newer_than:7d`, free text, or any combination
-- `count` (number, optional): Maximum number of results to return (default: 20)
+| Tool | Purpose |
+| --- | --- |
+| `gmail_set_flags(id, read, starred)` | Both optional; omitted fields unchanged. |
+| `gmail_labels(id, add, remove)` | Add or remove labels. |
+| `gmail_trash(id)` | Move to Trash from any mailbox. |
 
-**Returns:** Formatted table with matching emails (UID, Status, From, Date, Subject).
+Gmail messages hold several labels at once, so **adding a label files a message
+without moving it**. Archive by removing `\Inbox`. Move by adding the
+destination and removing the source. System labels take a backslash: `\Inbox`,
+`\Starred`, `\Important`.
 
-## Example Usage
+There is no permanent-delete tool. `gmail_trash` is recoverable; Gmail purges
+Trash after 30 days.
 
-```
-User: What's in my inbox?
+## Permissions
 
-Assistant: I'll check your recent emails.
+Three independent settings, drawn around *does this leave the building?*
 
-[Uses list_emails tool]
+| Setting | Covers | Default |
+| --- | --- | --- |
+| `GMAIL_ALLOW_READ` | Reading messages, labels, attachments | on |
+| `GMAIL_ALLOW_ORGANIZE` | Flags, labels, trash, and all draft operations | on |
+| `GMAIL_ALLOW_SEND` | Transmitting: send, reply, forward, send_draft | **off** |
 
-Recent Emails (5):
+Drafting never requires send permission. If sending is blocked, save a draft and
+tell the user it is waiting for them to review and send.
 
-UID    | From                        | Date                        | Subject
--------+-----------------------------+-----------------------------+---------------------------
-1001   | boss@company.com            | Mon, 13 Apr 2026 09:00:00   | Q2 Planning Meeting
-1002   | alice@example.com           | Sun, 12 Apr 2026 15:30:00   | Re: Project Update
-...
-```
+## Working patterns
 
-```
-User: Send an email to alice@example.com with subject 'Thanks' and body 'Thanks for the update.'
+**Rewrite a draft.** `gmail_search("in:drafts")` → `gmail_read(id, format:"both")`
+→ `gmail_update_draft(id, body:"…")`. Use the returned new id from then on. Do
+not save a new draft and delete the old one; that is what `gmail_update_draft`
+is for.
 
-Assistant: I'll send that email for you.
+**Reply for review.** `gmail_draft_reply(id, body)` — no send permission needed.
+Add `reply_all: true` to include everyone on the original.
 
-[Uses send_email tool]
-
-Email sent successfully to alice@example.com
-```
-
-## When to Use
-
-- User asks to read, list, search, or send emails
-- User wants to check inbox
-- User wants to compose or reply to a message
-- User wants to save a draft without sending
-- User asks about email content or subject
+**Forward an attachment elsewhere.** `gmail_download_attachment` returns a path;
+pass that path in `attachments` to `gmail_send`.
 
 ## Notes
 
-- **IMAP for reading**: Connects via IMAP to fetch emails from INBOX and save drafts to [Gmail]/Drafts
-- **SMTP for sending**: Sends via SMTP with STARTTLS (port 587) or SMTPS (port 465)
-- **Configurable permissions**: Send and receive can be individually enabled/disabled
-- **Default read-only**: Only receiving enabled by default (GMAIL_ALLOW_RECEIVE=true, GMAIL_ALLOW_SEND=false)
-- **Environment variables for connection**:
-  - `GMAIL_EMAIL` (required): Email address for authentication
-  - `GMAIL_PASSWORD` (required): App password (use Gmail App Password, not account password)
-  - `GMAIL_IMAP_HOST` (default: imap.gmail.com): IMAP server host
-  - `GMAIL_IMAP_PORT` (default: 993): IMAP server port
-  - `GMAIL_SMTP_HOST` (default: smtp.gmail.com): SMTP server host
-  - `GMAIL_SMTP_PORT` (default: 587): SMTP server port
-- **Row limits**: Default 20 emails for list/search
-- **Gmail App Password**: You must generate an App Password from Google Account settings (2-Step Verification → App Passwords). Your regular Gmail password will not work.
+- **Auth is OAuth.** The user connects their Google account in extension
+  settings; no password is configured. If tools report "Gmail not connected",
+  the user must reconnect and grant the `https://mail.google.com/` scope.
+- **Attachments are written to disk, not returned inline**, so a large invoice
+  does not flood the conversation. Small text files are inlined as a convenience.
+- **Reading is bounded**: 20 results by default.

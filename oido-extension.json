@@ -13,6 +13,8 @@
         "GOOGLE_ACCESS_TOKEN": "${GOOGLE_ACCESS_TOKEN}",
         "GOOGLE_OAUTH_EMAIL": "${GOOGLE_OAUTH_EMAIL}",
         "GMAIL_ALLOW_SEND": "${GMAIL_ALLOW_SEND}",
+        "GMAIL_ALLOW_READ": "${GMAIL_ALLOW_READ}",
+        "GMAIL_ALLOW_ORGANIZE": "${GMAIL_ALLOW_ORGANIZE}",
         "GMAIL_ALLOW_RECEIVE": "${GMAIL_ALLOW_RECEIVE}"
       }
     }
@@ -48,14 +50,26 @@
       "tokenKey": "GOOGLE_ACCESS_TOKEN"
     },
     {
+      "name": "GMAIL_ALLOW_READ",
+      "description": "Read messages, labels and attachments",
+      "defaultValue": "true",
+      "type": "bool"
+    },
+    {
+      "name": "GMAIL_ALLOW_ORGANIZE",
+      "description": "Change flags and labels, move to trash, and create, edit or discard drafts. All reversible and confined to the mailbox — does not permit sending.",
+      "defaultValue": "true",
+      "type": "bool"
+    },
+    {
       "name": "GMAIL_ALLOW_SEND",
-      "description": "Allow sending emails via SMTP",
+      "description": "Transmit email to recipients (send, reply, forward, send a draft). Irreversible and externally visible.",
       "defaultValue": "false",
       "type": "bool"
     },
     {
       "name": "GMAIL_ALLOW_RECEIVE",
-      "description": "Allow reading/receiving emails via IMAP",
+      "description": "Deprecated: previous name for GMAIL_ALLOW_READ. Still honoured for existing connections.",
       "defaultValue": "true",
       "type": "bool"
     }
