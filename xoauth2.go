@@ -1,17 +1,25 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/smtp"
+	"time"
 )
 
 // fetchGoogleEmail resolves the account email for an OAuth access token via the
 // Google userinfo endpoint. Lets the plugin self-identify when GMAIL_EMAIL is
 // unset, so an OAuth connection alone is enough (no separate email config).
 func fetchGoogleEmail(token string) (string, error) {
-	req, err := http.NewRequest("GET", "https://www.googleapis.com/oauth2/v1/userinfo?alt=json", nil)
+	// Called from parseEmailSettings during startup, where there is no request
+	// context to inherit. Bound it here so an unreachable userinfo endpoint
+	// cannot hang the server before it finishes starting.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://www.googleapis.com/oauth2/v1/userinfo?alt=json", nil)
 	if err != nil {
 		return "", err
 	}
