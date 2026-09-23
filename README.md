@@ -88,20 +88,47 @@ This creates `dist/oido-gmail.zip` for upload via the Plugins UI.
 
 ## Tools
 
-### `list_emails`
-List recent emails from INBOX.
+### Reading
 
-### `read_email`
-Read full email content by UID.
+| Tool | Purpose |
+|------|---------|
+| `gmail_search(query, count)` | Search or list anywhere (inbox, sent, drafts, trash, all mail) using full Gmail syntax. Returns ids used by every other tool. |
+| `gmail_read(id, format)` | Read one message in full: headers, body (`text`/`html`/`both`), attachment list. |
+| `gmail_list_labels()` | List the labels/mailboxes on the account. |
+| `gmail_download_attachment(id, filename)` | Save an attachment into the workspace and return its path. |
 
-### `send_email`
-Send an email (requires `GMAIL_ALLOW_SEND=true`).
+### Composing
 
-### `save_draft`
-Save an email as a draft (requires `GMAIL_ALLOW_SEND=true`).
+| Tool | Sends? |
+|------|--------|
+| `gmail_save_draft(...)` | No — returns a draft id |
+| `gmail_update_draft(id, ...)` | No — partial update, returns a **new** draft id |
+| `gmail_delete_draft(id)` | No |
+| `gmail_draft_reply(id, body, reply_all)` | No |
+| `gmail_send(...)` | Yes (requires `GMAIL_ALLOW_SEND=true`) |
+| `gmail_send_draft(id)` | Yes |
+| `gmail_reply(id, body, reply_all)` | Yes |
+| `gmail_forward(id, to, additional_body)` | Yes — carries attachments |
 
-### `search_emails`
-Search emails with full Gmail query syntax (`is:unread`, `from:`, `has:attachment`, `newer_than:7d`, ...).
+### Organizing
+
+| Tool | Purpose |
+|------|---------|
+| `gmail_set_flags(id, read, starred)` | Mark read/unread and/or starred/unstarred. |
+| `gmail_labels(id, add, remove)` | Add or remove Gmail labels. |
+| `gmail_trash(id)` | Move a message to Trash from any mailbox (recoverable for 30 days). |
+
+### TypeSafe judgments (optional — needs `OIDO_TYPESAFE_API_KEY`)
+
+| Tool | Purpose |
+|------|---------|
+| `gmail_triage(query, count)` | Search + rank by importance and reply-need in one pass. |
+| `gmail_classify(ids, categories)` | Sort known ids into caller-given categories. |
+| `gmail_suggest_labels(ids, apply)` | Suggest (and optionally apply) an existing label per message. |
+| `gmail_phishing_check(ids)` | Flag likely phishing/social-engineering. Advisory only. |
+| `gmail_digest(query, count)` | Grouped digest (action_required / fyi / newsletter / notification) with importance and reply-need per message. |
+
+See `OIDO.md` for full parameter details and usage guidance.
 
 ## Architecture
 
