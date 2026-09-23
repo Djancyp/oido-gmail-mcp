@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -16,12 +17,22 @@ type TypesafeHandler struct {
 	ts *typesafeClient
 }
 
+// maxIDsPerCall bounds gmail_classify/gmail_suggest_labels/gmail_phishing_check,
+// each of which does one full gc.Read per id before the (single) TypeSafe call.
+const maxIDsPerCall = 50
+
 var importanceCriteria = []string{
 	"not important: promotional, automated notification, or no action possible",
 	"low: informational, no action needed soon",
 	"medium: worth reading this week, minor action possible",
 	"high: needs a timely response or decision",
 	"critical: urgent, time-sensitive, or from someone the user must not ignore",
+}
+
+// maxImportanceScore is the top of the importanceCriteria scale, derived so
+// the display denominator can never drift out of sync with the criteria list.
+func maxImportanceScore() float64 {
+	return float64(len(importanceCriteria) - 1)
 }
 
 // registerTypesafeTools adds Gmail+TypeSafe tools to server if TypeSafe is
@@ -82,10 +93,72 @@ func emailState(emails []EmailSummary) []map[string]any {
 	return state
 }
 
+// truncateRunes cuts s to at most max bytes without splitting a multi-byte
+// UTF-8 rune, so excerpts sent to TypeSafe never end in a corrupted character.
+func truncateRunes(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
+	}
+	return s[:max]
+}
+
+func checkIDsBound(ids []string) error {
+	if len(ids) == 0 {
+		return fmt.Errorf("ids is required (get them from gmail_search or gmail_triage)")
+	}
+	if len(ids) > maxIDsPerCall {
+		return fmt.Errorf("too many ids (%d): pass at most %d per call, each one costs a full message read", len(ids), maxIDsPerCall)
+	}
+	return nil
+}
+
 // TriageArgs are the arguments for gmail_triage.
 type TriageArgs struct {
 	Query string `json:"query" jsonschema:"Gmail search query, same syntax as gmail_search. Defaults to 'is:unread in:inbox'."`
 	Count int    `json:"count" jsonschema:"Maximum messages to consider (default 20, max 50)."`
+}
+
+// rankedEmail is one triaged message: its importance score and whether it
+// likely needs a reply, pulled out of the raw TypeSafe answers map.
+type rankedEmail struct {
+	e          EmailSummary
+	score      float64
+	needsReply bool
+}
+
+// rankByImportance pairs each email with its TypeSafe answers and sorts by
+// importance score descending. A missing answer (e.g. a partial API response)
+// defaults to score 0 / no reply needed rather than panicking or vanishing.
+func rankByImportance(emails []EmailSummary, answers map[string]typesafeAnswer) []rankedEmail {
+	rows := make([]rankedEmail, 0, len(emails))
+	for _, e := range emails {
+		r := rankedEmail{e: e}
+		if a, ok := answers["importance_"+e.ID]; ok && a.Score != nil {
+			r.score = *a.Score
+		}
+		if a, ok := answers["reply_"+e.ID]; ok && a.Noul != nil {
+			r.needsReply = *a.Noul >= 0.5
+		}
+		rows = append(rows, r)
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].score > rows[j].score })
+	return rows
+}
+
+func formatTriage(rows []rankedEmail) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d message(s), ranked by importance:\n\n", len(rows))
+	for _, r := range rows {
+		reply := ""
+		if r.needsReply {
+			reply = " [needs reply]"
+		}
+		fmt.Fprintf(&b, "- (%.1f/%.0f)%s %s — from %s — %s — id %s\n", r.score, maxImportanceScore(), reply, r.e.Subject, r.e.From, r.e.Date, r.e.ID)
+	}
+	return b.String()
 }
 
 func (h *TypesafeHandler) HandleTriage(ctx context.Context, req *mcp.CallToolRequest, args TriageArgs) (*mcp.CallToolResult, any, error) {
@@ -124,45 +197,18 @@ func (h *TypesafeHandler) HandleTriage(ctx context.Context, req *mcp.CallToolReq
 		return mcpErr(err.Error()), nil, nil
 	}
 
-	type ranked struct {
-		e          EmailSummary
-		score      float64
-		needsReply bool
-	}
-	rows := make([]ranked, 0, len(emails))
-	for _, e := range emails {
-		r := ranked{e: e}
-		if a, ok := answers["importance_"+e.ID]; ok && a.Score != nil {
-			r.score = *a.Score
-		}
-		if a, ok := answers["reply_"+e.ID]; ok && a.Noul != nil {
-			r.needsReply = *a.Noul >= 0.5
-		}
-		rows = append(rows, r)
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].score > rows[j].score })
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d message(s), ranked by importance:\n\n", len(rows))
-	for _, r := range rows {
-		reply := ""
-		if r.needsReply {
-			reply = " [needs reply]"
-		}
-		fmt.Fprintf(&b, "- (%.1f/4)%s %s — from %s — %s — id %s\n", r.score, reply, r.e.Subject, r.e.From, r.e.Date, r.e.ID)
-	}
-	return mcpOK(b.String()), nil, nil
+	return mcpOK(formatTriage(rankByImportance(emails, answers))), nil, nil
 }
 
 // ClassifyArgs are the arguments for gmail_classify.
 type ClassifyArgs struct {
-	IDs        []string          `json:"ids" jsonschema:"Message ids to classify, from gmail_search or gmail_triage."`
+	IDs        []string          `json:"ids" jsonschema:"Message ids to classify, from gmail_search or gmail_triage. Max 50 per call."`
 	Categories map[string]string `json:"categories" jsonschema:"Map of category name to a short rubric describing when it applies, e.g. {\"urgent\": \"needs action today\", \"newsletter\": \"bulk/marketing content\"}. 2-255 categories."`
 }
 
 func (h *TypesafeHandler) HandleClassify(ctx context.Context, req *mcp.CallToolRequest, args ClassifyArgs) (*mcp.CallToolResult, any, error) {
-	if len(args.IDs) == 0 {
-		return mcpErr("ids is required (get them from gmail_search or gmail_triage)"), nil, nil
+	if err := checkIDsBound(args.IDs); err != nil {
+		return mcpErr(err.Error()), nil, nil
 	}
 	if len(args.Categories) < 2 {
 		return mcpErr("categories must list at least 2 options"), nil, nil
@@ -197,15 +243,26 @@ func (h *TypesafeHandler) HandleClassify(ctx context.Context, req *mcp.CallToolR
 
 // SuggestLabelsArgs are the arguments for gmail_suggest_labels.
 type SuggestLabelsArgs struct {
-	IDs   []string `json:"ids" jsonschema:"Message ids to label, from gmail_search or gmail_triage. Kept explicit and bounded since each id costs one full read."`
+	IDs   []string `json:"ids" jsonschema:"Message ids to label, from gmail_search or gmail_triage. Kept explicit and bounded (max 50) since each id costs one full read."`
 	Apply bool     `json:"apply" jsonschema:"If true, add the suggested label to each message (requires GMAIL_ALLOW_ORGANIZE). If false (default), only suggest."`
 }
 
 const noLabelOption = "no_label"
 
+// labelCandidate is one message read in full for label suggestion: kept as a
+// typed struct (not a map[string]any) so its id is used as a Handle directly,
+// with no type assertion needed to apply the chosen label back.
+type labelCandidate struct {
+	handle  Handle
+	id      string
+	from    string
+	subject string
+	body    string
+}
+
 func (h *TypesafeHandler) HandleSuggestLabels(ctx context.Context, req *mcp.CallToolRequest, args SuggestLabelsArgs) (*mcp.CallToolResult, any, error) {
-	if len(args.IDs) == 0 {
-		return mcpErr("ids is required (get them from gmail_search or gmail_triage)"), nil, nil
+	if err := checkIDsBound(args.IDs); err != nil {
+		return mcpErr(err.Error()), nil, nil
 	}
 
 	labels, err := h.gc.ListLabels(ctx)
@@ -217,11 +274,7 @@ func (h *TypesafeHandler) HandleSuggestLabels(ctx context.Context, req *mcp.Call
 		criteria[l] = "the message belongs under this existing label"
 	}
 
-	type detail struct {
-		id      Handle
-		summary map[string]any
-	}
-	details := make([]detail, 0, len(args.IDs))
+	candidates := make([]labelCandidate, 0, len(args.IDs))
 	state := make([]map[string]any, 0, len(args.IDs))
 	for _, idStr := range args.IDs {
 		handle, err := ParseHandle(idStr)
@@ -232,20 +285,16 @@ func (h *TypesafeHandler) HandleSuggestLabels(ctx context.Context, req *mcp.Call
 		if err != nil {
 			return mcpErr(fmt.Sprintf("reading %s: %v", idStr, err)), nil, nil
 		}
-		body := d.BodyText
-		if len(body) > 1000 {
-			body = body[:1000]
-		}
-		s := map[string]any{"id": idStr, "from": d.From, "subject": d.Subject, "body_excerpt": body}
-		details = append(details, detail{id: handle, summary: s})
-		state = append(state, s)
+		c := labelCandidate{handle: handle, id: idStr, from: d.From, subject: d.Subject, body: truncateRunes(d.BodyText, 1000)}
+		candidates = append(candidates, c)
+		state = append(state, map[string]any{"id": c.id, "from": c.from, "subject": c.subject, "body_excerpt": c.body})
 	}
 
-	questions := make(map[string]typesafeQuestion, len(details))
-	for _, d := range details {
-		questions["label_"+d.summary["id"].(string)] = typesafeQuestion{
+	questions := make(map[string]typesafeQuestion, len(candidates))
+	for _, c := range candidates {
+		questions["label_"+c.id] = typesafeQuestion{
 			Type:         "choice",
-			Instructions: fmt.Sprintf("Which existing label best fits the email with id %q? Choose %q if none fit well.", d.summary["id"], noLabelOption),
+			Instructions: fmt.Sprintf("Which existing label best fits the email with id %q? Choose %q if none fit well.", c.id, noLabelOption),
 			Criteria:     criteria,
 		}
 	}
@@ -256,12 +305,11 @@ func (h *TypesafeHandler) HandleSuggestLabels(ctx context.Context, req *mcp.Call
 	}
 
 	var b strings.Builder
-	for _, d := range details {
-		idStr := d.summary["id"].(string)
-		a := answers["label_"+idStr]
-		line := fmt.Sprintf("- %s -> %s", idStr, a.Choice)
+	for _, c := range candidates {
+		a := answers["label_"+c.id]
+		line := fmt.Sprintf("- %s -> %s", c.id, a.Choice)
 		if args.Apply && a.Choice != noLabelOption {
-			if err := h.gc.Labels(ctx, d.id, []string{a.Choice}, nil); err != nil {
+			if err := h.gc.Labels(ctx, c.handle, []string{a.Choice}, nil); err != nil {
 				line += fmt.Sprintf(" (apply failed: %v)", err)
 			} else {
 				line += " (applied)"
@@ -274,12 +322,12 @@ func (h *TypesafeHandler) HandleSuggestLabels(ctx context.Context, req *mcp.Call
 
 // PhishingCheckArgs are the arguments for gmail_phishing_check.
 type PhishingCheckArgs struct {
-	IDs []string `json:"ids" jsonschema:"Message ids to check, from gmail_search or gmail_triage."`
+	IDs []string `json:"ids" jsonschema:"Message ids to check, from gmail_search or gmail_triage. Max 50 per call."`
 }
 
 func (h *TypesafeHandler) HandlePhishingCheck(ctx context.Context, req *mcp.CallToolRequest, args PhishingCheckArgs) (*mcp.CallToolResult, any, error) {
-	if len(args.IDs) == 0 {
-		return mcpErr("ids is required"), nil, nil
+	if err := checkIDsBound(args.IDs); err != nil {
+		return mcpErr(err.Error()), nil, nil
 	}
 
 	type row struct {
@@ -296,10 +344,7 @@ func (h *TypesafeHandler) HandlePhishingCheck(ctx context.Context, req *mcp.Call
 		if err != nil {
 			return mcpErr(fmt.Sprintf("reading %s: %v", idStr, err)), nil, nil
 		}
-		body := d.BodyText
-		if len(body) > 1500 {
-			body = body[:1500]
-		}
+		body := truncateRunes(d.BodyText, 1500)
 		rows = append(rows, row{id: idStr, subject: d.Subject, from: d.From})
 		state = append(state, map[string]any{
 			"id": idStr, "from": d.From, "reply_to": d.ReplyTo, "subject": d.Subject, "body_excerpt": body,
@@ -352,6 +397,69 @@ var digestCategories = map[string]string{
 	"notification":    "automated system or service notification",
 }
 
+// digestCategoryOrder is the preferred print order for known categories.
+// otherCategory catches anything TypeSafe returns outside that set (an
+// unanswered question, a hallucinated label, a future extra category) so no
+// message is ever silently dropped from the digest.
+var digestCategoryOrder = []string{"action_required", "fyi", "notification", "newsletter"}
+
+const otherCategory = "other"
+
+// groupForDigest buckets each email under its TypeSafe category, falling back
+// to otherCategory for anything not in digestCategoryOrder, and returns the
+// print order: known categories first (in digestCategoryOrder), then any
+// other categories actually seen, in first-seen order, so the total message
+// count printed always matches len(emails).
+func groupForDigest(emails []EmailSummary, answers map[string]typesafeAnswer) (groups map[string][]string, order []string) {
+	groups = map[string][]string{}
+	known := map[string]bool{}
+	for _, c := range digestCategoryOrder {
+		known[c] = true
+	}
+
+	var extra []string
+	seenExtra := map[string]bool{}
+	for _, e := range emails {
+		cat := answers["cat_"+e.ID].Choice
+		if cat == "" || !known[cat] {
+			if cat == "" {
+				cat = otherCategory
+			}
+			if !known[cat] && !seenExtra[cat] {
+				seenExtra[cat] = true
+				extra = append(extra, cat)
+			}
+		}
+
+		score := 0.0
+		if a, ok := answers["importance_"+e.ID]; ok && a.Score != nil {
+			score = *a.Score
+		}
+		reply := ""
+		if a, ok := answers["reply_"+e.ID]; ok && a.Noul != nil && *a.Noul >= 0.5 {
+			reply = " [needs reply]"
+		}
+		line := fmt.Sprintf("  - (%.1f/%.0f)%s %s — from %s — id %s", score, maxImportanceScore(), reply, e.Subject, e.From, e.ID)
+		groups[cat] = append(groups[cat], line)
+	}
+
+	order = append(append([]string{}, digestCategoryOrder...), extra...)
+	return groups, order
+}
+
+func formatDigest(total int, groups map[string][]string, order []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Digest of %d message(s):\n\n", total)
+	for _, cat := range order {
+		lines, ok := groups[cat]
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(&b, "%s (%d):\n%s\n\n", cat, len(lines), strings.Join(lines, "\n"))
+	}
+	return b.String()
+}
+
 func (h *TypesafeHandler) HandleDigest(ctx context.Context, req *mcp.CallToolRequest, args DigestArgs) (*mcp.CallToolResult, any, error) {
 	query := strings.TrimSpace(args.Query)
 	if query == "" {
@@ -393,32 +501,8 @@ func (h *TypesafeHandler) HandleDigest(ctx context.Context, req *mcp.CallToolReq
 		return mcpErr(err.Error()), nil, nil
 	}
 
-	groups := map[string][]string{}
-	for _, e := range emails {
-		cat := answers["cat_"+e.ID].Choice
-		score := 0.0
-		if a, ok := answers["importance_"+e.ID]; ok && a.Score != nil {
-			score = *a.Score
-		}
-		reply := ""
-		if a, ok := answers["reply_"+e.ID]; ok && a.Noul != nil && *a.Noul >= 0.5 {
-			reply = " [needs reply]"
-		}
-		line := fmt.Sprintf("  - (%.1f/4)%s %s — from %s — id %s", score, reply, e.Subject, e.From, e.ID)
-		groups[cat] = append(groups[cat], line)
-	}
-
-	order := []string{"action_required", "fyi", "notification", "newsletter"}
-	var b strings.Builder
-	fmt.Fprintf(&b, "Digest of %d message(s):\n\n", len(emails))
-	for _, cat := range order {
-		lines, ok := groups[cat]
-		if !ok {
-			continue
-		}
-		fmt.Fprintf(&b, "%s (%d):\n%s\n\n", cat, len(lines), strings.Join(lines, "\n"))
-	}
-	return mcpOK(b.String()), nil, nil
+	groups, order := groupForDigest(emails, answers)
+	return mcpOK(formatDigest(len(emails), groups, order)), nil, nil
 }
 
 // summariesForIDs resolves explicit message ids into EmailSummary-shaped data

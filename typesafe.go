@@ -59,7 +59,9 @@ type typesafeClient struct {
 }
 
 func newTypesafeClient(cfg *typesafeConfig) *typesafeClient {
-	return &typesafeClient{cfg: cfg, hc: &http.Client{Timeout: 30 * time.Second}}
+	// gmail_digest can pack up to 150 questions (count=50 x 3) into one
+	// request; give it more headroom than a single-question call needs.
+	return &typesafeClient{cfg: cfg, hc: &http.Client{Timeout: 60 * time.Second}}
 }
 
 // ask sends parallel questions over one shared state in a single request, so
