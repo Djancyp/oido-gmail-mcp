@@ -73,6 +73,27 @@ destination and removing the source. System labels take a backslash: `\Inbox`,
 There is no permanent-delete tool. `gmail_trash` is recoverable; Gmail purges
 Trash after 30 days.
 
+### TypeSafe judgments (optional)
+
+Only present when `OIDO_TYPESAFE_API_KEY` is configured. Use these instead of
+guessing at importance/category from raw text — they return calibrated
+judgments from TypeSafe's System One model, one HTTP call per tool regardless
+of how many messages are involved.
+
+| Tool | Purpose |
+| --- | --- |
+| `gmail_triage(query, count)` | Search + rank by importance (0-4) and reply-need in one pass. Use for "what's important" / "do I need to reply to anything". |
+| `gmail_classify(ids, categories)` | Sort known ids into caller-given categories, e.g. `{"urgent": "...", "newsletter": "..."}`. |
+| `gmail_suggest_labels(ids, apply)` | Suggest which existing label fits each message; `apply:true` files it (needs `GMAIL_ALLOW_ORGANIZE`). |
+| `gmail_phishing_check(ids)` | Flags likely phishing/social-engineering. **Advisory only** — verify before trusting, never auto-delete on this alone. |
+| `gmail_digest(query, count)` | Grouped digest (action_required / fyi / newsletter / notification) with importance + reply-need per message. |
+
+`gmail_triage` and `gmail_digest` score using only subject/sender/date — they
+never read message bodies. `gmail_classify` also works off search results.
+`gmail_suggest_labels` and `gmail_phishing_check` take explicit `ids` and read
+each message in full, since accuracy there needs body content — keep `ids`
+lists bounded to what you actually need judged.
+
 ## Permissions
 
 Three independent settings, drawn around *does this leave the building?*

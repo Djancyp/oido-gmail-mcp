@@ -230,6 +230,8 @@ func RunMCPServer() {
 		Annotations: annReadOnly,
 	}, handler.HandleDownloadAttachment)
 
+	registerTypesafeTools(server, gmailClient, typesafeConfigFromEnv())
+
 	ctx := context.Background()
 	log.Println("Oido Gmail MCP Server starting on stdio...")
 	if err := server.Run(ctx, &mcp.StdioTransport{}); err != nil {

@@ -15,7 +15,10 @@
         "GMAIL_ALLOW_SEND": "${GMAIL_ALLOW_SEND}",
         "GMAIL_ALLOW_READ": "${GMAIL_ALLOW_READ}",
         "GMAIL_ALLOW_ORGANIZE": "${GMAIL_ALLOW_ORGANIZE}",
-        "GMAIL_ALLOW_RECEIVE": "${GMAIL_ALLOW_RECEIVE}"
+        "GMAIL_ALLOW_RECEIVE": "${GMAIL_ALLOW_RECEIVE}",
+        "OIDO_TYPESAFE_API_KEY": "${OIDO_TYPESAFE_API_KEY}",
+        "OIDO_TYPESAFE_BASE_URL": "${OIDO_TYPESAFE_BASE_URL}",
+        "OIDO_TYPESAFE_MODEL": "${OIDO_TYPESAFE_MODEL}"
       }
     }
   },
@@ -72,6 +75,25 @@
       "description": "Deprecated: previous name for GMAIL_ALLOW_READ. Still honoured for existing connections.",
       "defaultValue": "true",
       "type": "bool"
+    },
+    {
+      "name": "OIDO_TYPESAFE_API_KEY",
+      "description": "Optional: TypeSafe API key. When set, enables gmail_triage, gmail_classify, gmail_suggest_labels, gmail_phishing_check and gmail_digest. Leave blank to skip these tools entirely.",
+      "defaultValue": "",
+      "type": "string",
+      "sensitive": true
+    },
+    {
+      "name": "OIDO_TYPESAFE_BASE_URL",
+      "description": "TypeSafe API base URL. Change only to point at a compatible endpoint.",
+      "defaultValue": "https://api.typesafe.ai/v1",
+      "type": "string"
+    },
+    {
+      "name": "OIDO_TYPESAFE_MODEL",
+      "description": "System One model name to request",
+      "defaultValue": "jev-latest",
+      "type": "string"
     }
   ]
 }
